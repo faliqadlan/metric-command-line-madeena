@@ -10,6 +10,12 @@ import time
 
 # --- FUNGSI KALKULASI METRIK ---
 # Fungsi-fungsi ini sekarang menjadi bagian dari script utama.
+#
+# 📝 CARA MENAMBAHKAN METRIK BARU:
+# 1. Tambahkan fungsi calculate_your_metric() di bagian ini
+# 2. Ikuti template yang sama: input image, output float/np.nan
+# 3. Tambahkan error handling dengan try-catch
+# 4. Lihat file HOW_TO_ADD_METRICS.md untuk panduan lengkap
 
 
 def calculate_contrast(image, mask):
@@ -112,6 +118,37 @@ def calculate_eme(image, r, c, epsilon=1e-4):
 
     eme /= num_blocks
     return eme
+
+
+# 📝 TEMPLATE UNTUK MENAMBAHKAN METRIK BARU:
+#
+# def calculate_your_new_metric(image, **kwargs):
+#     """
+#     Menghitung metrik kualitas gambar [NAMA METRIK].
+#
+#     Args:
+#         image: Input gambar (numpy array), biasanya grayscale
+#         **kwargs: Parameter tambahan yang mungkin diperlukan
+#
+#     Returns:
+#         float: Nilai metrik yang dihitung, atau np.nan jika error
+#     """
+#     try:
+#         # Pastikan gambar dalam format grayscale
+#         if len(image.shape) == 3:
+#             gray_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+#         else:
+#             gray_img = image
+#
+#         # IMPLEMENTASI KALKULASI METRIK ANDA DI SINI
+#         # Contoh: menghitung rata-rata intensitas
+#         result = np.mean(gray_img)
+#
+#         return float(result)
+#
+#     except Exception as e:
+#         print(f"⚠️  Error menghitung metrik baru: {e}")
+#         return np.nan
 
 
 def create_roi_mask(image, method="otsu"):
@@ -432,6 +469,9 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                 row_data[f"EME {folder_name}"] = calculate_eme(
                     gray_img, r=eme_r, c=eme_c
                 )
+
+                # 📝 TAMBAHKAN METRIK BARU DI SINI:
+                # row_data[f"YOUR_METRIC {folder_name}"] = calculate_your_new_metric(gray_img)
             except Exception as e:
                 print(
                     f"⚠️  Gagal menganalisis gambar {img_num} dari folder {folder_name}"
@@ -441,6 +481,8 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                 row_data[f"EME {folder_name}"] = "ERROR"
 
         # 2. Hitung CII antar folder
+        # 📝 UNTUK METRIK YANG MEMBANDINGKAN ANTAR FOLDER (seperti CII, PSNR, SSIM):
+        # Tambahkan kalkulasi di bagian ini, menggunakan pola yang sama
         for ref_path, proc_path in cii_combinations:
             ref_name = folder_names[ref_path]
             proc_name = folder_names[proc_path]
@@ -481,6 +523,11 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                     row_data[f"CII {ref_name} vs {proc_name}"] = calculate_cii(
                         ref_gray, proc_gray, mask
                     )
+
+                    # 📝 TAMBAHKAN METRIK PERBANDINGAN ANTAR FOLDER DI SINI:
+                    # Contoh untuk PSNR:
+                    # row_data[f"PSNR {proc_name} vs {ref_name}"] = calculate_psnr(proc_gray, ref_gray)
+                    # row_data[f"PSNR {ref_name} vs {proc_name}"] = calculate_psnr(ref_gray, proc_gray)
                 except Exception as e:
                     print(
                         f"Warning: Failed to calculate CII for {ref_name} vs {proc_name}, image {img_num}: {e}"
@@ -530,6 +577,9 @@ def process_single_image(args):
 
             row_data[f"ENT {folder_name}"] = calculate_entropy(gray_img)
             row_data[f"EME {folder_name}"] = calculate_eme(gray_img, r=eme_r, c=eme_c)
+
+            # 📝 TAMBAHKAN METRIK BARU DI SINI JUGA (untuk pemrosesan paralel):
+            # row_data[f"YOUR_METRIC {folder_name}"] = calculate_your_new_metric(gray_img)
         except Exception as e:
             print(
                 f"Warning: Failed to calculate metrics for {folder_name}, image {img_num}: {e}"
@@ -538,6 +588,8 @@ def process_single_image(args):
             row_data[f"EME {folder_name}"] = np.nan
 
     # 2. Hitung CII antar folder
+    # 📝 UNTUK METRIK PERBANDINGAN ANTAR FOLDER (seperti CII, PSNR, SSIM):
+    # Tambahkan kalkulasi di bagian ini juga, untuk pemrosesan paralel
     for ref_path, proc_path in cii_combinations:
         ref_name = folder_names[ref_path]
         proc_name = folder_names[proc_path]
@@ -571,6 +623,11 @@ def process_single_image(args):
                 row_data[f"CII {ref_name} vs {proc_name}"] = calculate_cii(
                     ref_gray, proc_gray, mask
                 )
+
+                # 📝 TAMBAHKAN METRIK PERBANDINGAN ANTAR FOLDER DI SINI JUGA:
+                # Contoh untuk PSNR:
+                # row_data[f"PSNR {proc_name} vs {ref_name}"] = calculate_psnr(proc_gray, ref_gray)
+                # row_data[f"PSNR {ref_name} vs {proc_name}"] = calculate_psnr(ref_gray, proc_gray)
             except Exception as e:
                 print(
                     f"Warning: Failed to calculate CII for {ref_name} vs {proc_name}, image {img_num}: {e}"
@@ -644,6 +701,12 @@ def main():
         print("• EME - mengukur tingkat perbaikan gambar")
         print("• CII - membandingkan kontras antar gambar")
         print("")
+        print("🔧 Info untuk Developer:")
+        print("   Untuk menambahkan metrik baru, lihat:")
+        print("   • File HOW_TO_ADD_METRICS.md - panduan lengkap")
+        print("   • Komentar 📝 di dalam kode - lokasi penambahan")
+        print("   • File EXAMPLE_ADD_VARIANCE_METRIC.py - contoh implementasi")
+        print("")
 
         folder_paths = get_folder_paths()
         if not folder_paths:
@@ -690,7 +753,12 @@ def main():
         eme_cols = sorted([col for col in df.columns if col.startswith("EME")])
         cii_cols = sorted([col for col in df.columns if col.startswith("CII")])
 
+        # 📝 TAMBAHKAN SORTING KOLOM METRIK BARU DI SINI:
+        # your_metric_cols = sorted([col for col in df.columns if col.startswith("YOUR_METRIC")])
+
         df = df.reindex(columns=cols + ent_cols + eme_cols + cii_cols)
+        # 📝 JANGAN LUPA UPDATE REINDEX INI JUGA:
+        # df = df.reindex(columns=cols + ent_cols + eme_cols + your_metric_cols + cii_cols)
         df.to_csv(output_filename, index=False, float_format="%.4f")
 
         print(
