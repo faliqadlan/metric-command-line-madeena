@@ -22,34 +22,83 @@ def calculate_contrast(image, mask):
     """
     Menghitung kontras dari sebuah area pada gambar yang ditentukan oleh mask.
     """
-    foreground = image[mask == 1]
-    background = image[mask == 0]
+    try:
+        # Validasi input
+        if image is None or mask is None:
+            return 0.0
 
-    if foreground.size == 0 or background.size == 0:
+        if image.shape != mask.shape:
+            return 0.0
+
+        # Pastikan mask adalah binary (0 atau 1)
+        mask_binary = (mask > 0).astype(np.uint8)
+
+        foreground = image[mask_binary == 1]
+        background = image[mask_binary == 0]
+
+        # Cek apakah ada piksel di foreground dan background
+        if foreground.size == 0 or background.size == 0:
+            return 0.0
+
+        X_f = np.mean(foreground.astype(np.float64))
+        X_b = np.mean(background.astype(np.float64))
+
+        # Cek pembagian dengan nol
+        denominator = X_f + X_b
+        if abs(denominator) < 1e-10:
+            return 0.0
+
+        contrast = (X_f - X_b) / denominator
+
+        # Pastikan hasil valid
+        if np.isnan(contrast) or np.isinf(contrast):
+            return 0.0
+
+        return float(contrast)
+
+    except Exception as e:
+        print(f"⚠️  Error dalam kalkulasi kontras: {e}")
         return 0.0
-
-    X_f = np.mean(foreground)
-    X_b = np.mean(background)
-
-    if X_f + X_b == 0:
-        return 0.0  # Menghindari pembagian dengan nol
-
-    contrast = (X_f - X_b) / (X_f + X_b)
-    return contrast
 
 
 def calculate_cii(processed_image, reference_image, mask):
     """
-    Menghitung Contrast Improvement Index (CII).
+    Menghitung Contrast Improvement Index (CII) dengan validasi keamanan.
     """
-    C_processed = calculate_contrast(processed_image, mask)
-    C_reference = calculate_contrast(reference_image, mask)
+    try:
+        # Validasi input
+        if processed_image is None or reference_image is None:
+            return np.nan
 
-    if C_reference == 0:
-        return np.nan  # Tidak terdefinisi jika kontras referensi adalah 0
+        if mask is None:
+            mask = np.ones_like(processed_image, dtype=np.uint8)
 
-    CII = C_processed / C_reference
-    return CII
+        # Pastikan mask memiliki ukuran yang sama
+        if mask.shape != processed_image.shape:
+            return np.nan
+
+        C_processed = calculate_contrast(processed_image, mask)
+        C_reference = calculate_contrast(reference_image, mask)
+
+        # Validasi hasil kontras
+        if np.isnan(C_processed) or np.isnan(C_reference):
+            return np.nan
+
+        # Validasi pembagi tidak nol
+        if abs(C_reference) < 1e-10:  # Hampir nol
+            return np.nan
+
+        CII = C_processed / C_reference
+
+        # Validasi hasil akhir
+        if np.isnan(CII) or np.isinf(CII):
+            return np.nan
+
+        return float(CII)
+
+    except Exception as e:
+        print(f"⚠️  Error dalam kalkulasi CII: {e}")
+        return np.nan
 
 
 def calculate_entropy(image):
@@ -257,6 +306,18 @@ def get_folder_paths():
     print("Masukkan alamat folder yang berisi gambar rontgen Anda.")
     print("Contoh: C:\\Users\\Nama\\Documents\\GambarRontgen")
     print("")
+    print("⚠️  PENTING - FORMAT NAMA FILE:")
+    print("   File gambar HARUS memiliki format: NOMOR_NAMAFILE")
+    print("   Contoh yang BENAR:")
+    print("   • 1_xray1.jpg")
+    print("   • 2_rontgen_dada.png")
+    print("   • 3_medical_image.tiff")
+    print("")
+    print("   Contoh yang SALAH:")
+    print("   • xray1.jpg (tidak ada nomor)")
+    print("   • 1-xray1.jpg (pakai tanda - bukan _)")
+    print("   • gambar_1.jpg (nomor di belakang)")
+    print("")
     print("💡 Tips: Anda bisa copy-paste alamat folder dari File Explorer")
     print("   Ketik 's' atau 'selesai' jika sudah selesai menambah folder")
     print("")
@@ -401,14 +462,21 @@ def parse_image_files(folder_paths):
     all_image_numbers = set()
     supported_extensions = get_supported_extensions()
 
-    print("\nMemindai file gambar...")
+    print("\n🔍 Memindai file gambar...")
+    invalid_files = []
+    total_files = 0
+    valid_files = 0
+
     for folder in tqdm(folder_paths, desc="Memindai Folder", unit="folder"):
         try:
+            folder_name = os.path.basename(folder)
             for filename in os.listdir(folder):
                 # Check file extension
                 file_ext = os.path.splitext(filename)[1].lower()
                 if file_ext not in supported_extensions:
                     continue
+
+                total_files += 1
 
                 try:
                     parts = filename.split("_", 1)
@@ -419,12 +487,33 @@ def parse_image_files(folder_paths):
                         if os.path.isfile(img_path):
                             image_map[folder][img_num] = img_path
                             all_image_numbers.add(img_num)
+                            valid_files += 1
+                    else:
+                        # File doesn't follow naming convention
+                        invalid_files.append(f"{folder_name}/{filename}")
                 except (ValueError, IndexError):
+                    invalid_files.append(f"{folder_name}/{filename}")
                     continue
         except OSError as e:
             print(f"⚠️  Tidak dapat mengakses folder: {os.path.basename(folder)}")
             print(f"   Kemungkinan folder terkunci atau tidak ada izin akses")
             continue
+
+    # Report results
+    print(f"\n📊 HASIL PEMINDAIAN:")
+    print(f"   Total file gambar ditemukan: {total_files}")
+    print(f"   File dengan format benar: {valid_files}")
+    print(f"   File dengan format salah: {len(invalid_files)}")
+
+    if invalid_files and len(invalid_files) <= 10:
+        print(f"\n⚠️  File dengan format nama salah:")
+        for invalid_file in invalid_files:
+            print(f"   • {invalid_file}")
+        print(f"   Ubah nama file tersebut ke format: NOMOR_NAMA")
+    elif len(invalid_files) > 10:
+        print(f"\n⚠️  Ada {len(invalid_files)} file dengan format nama salah")
+        print(f"   Contoh: {invalid_files[0]}, {invalid_files[1]}, ...")
+        print(f"   Ubah semua nama file ke format: NOMOR_NAMA")
 
     return image_map, sorted(list(all_image_numbers))
 
@@ -482,28 +571,31 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
 
         # 2. Hitung CII antar folder
         # 📝 UNTUK METRIK YANG MEMBANDINGKAN ANTAR FOLDER (seperti CII, PSNR, SSIM):
-        # Tambahkan kalkulasi di bagian ini, menggunakan pola yang sama
-        for ref_path, proc_path in cii_combinations:
-            ref_name = folder_names[ref_path]
-            proc_name = folder_names[proc_path]
-
-            if ref_path in images and proc_path in images:
-                ref_img, proc_img = images[ref_path], images[proc_path]
-
-                # Validate image compatibility
-                is_compatible, message = validate_image_compatibility(ref_img, proc_img)
-                if not is_compatible:
-                    print(
-                        f"⚠️  Gambar {img_num}: Tidak bisa dibandingkan antara {ref_name} dan {proc_name}"
-                    )
-                    print(f"   Alasan: Ukuran atau format gambar berbeda")
-                    row_data[f"CII {proc_name} vs {ref_name}"] = (
-                        "TIDAK BISA DIBANDINGKAN"
-                    )
-                    row_data[f"CII {ref_name} vs {proc_name}"] = (
-                        "TIDAK BISA DIBANDINGKAN"
-                    )
+        # Logika: folder yang diinput belakangan (processed) dibagi folder yang diinput lebih dulu (reference)
+        for i, proc_path in enumerate(folder_paths):
+            for j, ref_path in enumerate(folder_paths):
+                if i <= j:  # Skip jika processed tidak lebih belakangan dari reference
                     continue
+
+                proc_name = folder_names[proc_path]  # folder belakangan = processed
+                ref_name = folder_names[ref_path]  # folder lebih dulu = reference
+
+                if ref_path in images and proc_path in images:
+                    ref_img, proc_img = images[ref_path], images[proc_path]
+
+                    # Validate image compatibility
+                    is_compatible, message = validate_image_compatibility(
+                        ref_img, proc_img
+                    )
+                    if not is_compatible:
+                        print(
+                            f"⚠️  Gambar {img_num}: Tidak bisa dibandingkan antara {ref_name} dan {proc_name}"
+                        )
+                        print(f"   Alasan: Ukuran atau format gambar berbeda")
+                        row_data[f"CII {proc_name}/{ref_name}"] = (
+                            "TIDAK BISA DIBANDINGKAN"
+                        )
+                        continue
 
                 try:
                     # Convert to grayscale if needed
@@ -511,18 +603,42 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                         ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
                         proc_gray = cv2.cvtColor(proc_img, cv2.COLOR_BGR2GRAY)
                     else:
-                        ref_gray = ref_img
-                        proc_gray = proc_img
+                        ref_gray = ref_img.copy()
+                        proc_gray = proc_img.copy()
 
-                    # Create mask
-                    mask = create_roi_mask(ref_gray, method=mask_method)
+                    # Ensure images are in the same data type
+                    if ref_gray.dtype != proc_gray.dtype:
+                        # Convert to float64 for consistent calculation
+                        ref_gray = ref_gray.astype(np.float64)
+                        proc_gray = proc_gray.astype(np.float64)
 
-                    row_data[f"CII {proc_name} vs {ref_name}"] = calculate_cii(
-                        proc_gray, ref_gray, mask
-                    )
-                    row_data[f"CII {ref_name} vs {proc_name}"] = calculate_cii(
-                        ref_gray, proc_gray, mask
-                    )
+                    # Create mask with error handling
+                    try:
+                        mask = create_roi_mask(ref_gray, method=mask_method)
+
+                        # Validate mask
+                        if mask is None or mask.shape != ref_gray.shape:
+                            print(
+                                f"⚠️  Gambar {img_num}: Mask tidak valid, menggunakan seluruh gambar"
+                            )
+                            mask = np.ones_like(ref_gray, dtype=np.uint8)
+                    except Exception as mask_error:
+                        print(
+                            f"⚠️  Gambar {img_num}: Error membuat mask, menggunakan seluruh gambar"
+                        )
+                        mask = np.ones_like(ref_gray, dtype=np.uint8)
+
+                    # Calculate CII: processed / reference
+                    cii_result = calculate_cii(proc_gray, ref_gray, mask)
+
+                    # Validate CII results
+                    if np.isinf(cii_result):
+                        print(
+                            f"⚠️  Gambar {img_num}: CII {proc_name}/{ref_name} menghasilkan infinity"
+                        )
+                        cii_result = np.nan
+
+                    row_data[f"CII {proc_name}/{ref_name}"] = cii_result
 
                     # 📝 TAMBAHKAN METRIK PERBANDINGAN ANTAR FOLDER DI SINI:
                     # Contoh untuk PSNR:
@@ -530,10 +646,9 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                     # row_data[f"PSNR {ref_name} vs {proc_name}"] = calculate_psnr(ref_gray, proc_gray)
                 except Exception as e:
                     print(
-                        f"Warning: Failed to calculate CII for {ref_name} vs {proc_name}, image {img_num}: {e}"
+                        f"Warning: Failed to calculate CII for {proc_name}/{ref_name}, image {img_num}: {e}"
                     )
-                    row_data[f"CII {proc_name} vs {ref_name}"] = np.nan
-                    row_data[f"CII {ref_name} vs {proc_name}"] = np.nan
+                    row_data[f"CII {proc_name}/{ref_name}"] = np.nan
 
         results.append(row_data)
 
@@ -591,8 +706,8 @@ def process_single_image(args):
     # 📝 UNTUK METRIK PERBANDINGAN ANTAR FOLDER (seperti CII, PSNR, SSIM):
     # Tambahkan kalkulasi di bagian ini juga, untuk pemrosesan paralel
     for ref_path, proc_path in cii_combinations:
-        ref_name = folder_names[ref_path]
-        proc_name = folder_names[proc_path]
+        ref_name = folder_names[ref_path]  # reference (earlier folder)
+        proc_name = folder_names[proc_path]  # processed (later folder)
 
         if ref_path in images and proc_path in images:
             ref_img, proc_img = images[ref_path], images[proc_path]
@@ -601,8 +716,7 @@ def process_single_image(args):
             is_compatible, message = validate_image_compatibility(ref_img, proc_img)
             if not is_compatible:
                 print(f"Warning: Images incompatible for CII calculation ({message})")
-                row_data[f"CII {proc_name} vs {ref_name}"] = np.nan
-                row_data[f"CII {ref_name} vs {proc_name}"] = np.nan
+                row_data[f"CII {proc_name}/{ref_name}"] = np.nan
                 continue
 
             try:
@@ -611,18 +725,33 @@ def process_single_image(args):
                     ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
                     proc_gray = cv2.cvtColor(proc_img, cv2.COLOR_BGR2GRAY)
                 else:
-                    ref_gray = ref_img
-                    proc_gray = proc_img
+                    ref_gray = ref_img.copy()
+                    proc_gray = proc_img.copy()
 
-                # Create mask
-                mask = create_roi_mask(ref_gray, method=mask_method)
+                # Ensure images are in the same data type
+                if ref_gray.dtype != proc_gray.dtype:
+                    # Convert to float64 for consistent calculation
+                    ref_gray = ref_gray.astype(np.float64)
+                    proc_gray = proc_gray.astype(np.float64)
 
-                row_data[f"CII {proc_name} vs {ref_name}"] = calculate_cii(
-                    proc_gray, ref_gray, mask
-                )
-                row_data[f"CII {ref_name} vs {proc_name}"] = calculate_cii(
-                    ref_gray, proc_gray, mask
-                )
+                # Create mask with error handling
+                try:
+                    mask = create_roi_mask(ref_gray, method=mask_method)
+
+                    # Validate mask
+                    if mask is None or mask.shape != ref_gray.shape:
+                        mask = np.ones_like(ref_gray, dtype=np.uint8)
+                except Exception as mask_error:
+                    mask = np.ones_like(ref_gray, dtype=np.uint8)
+
+                # Calculate CII: processed / reference
+                cii_result = calculate_cii(proc_gray, ref_gray, mask)
+
+                # Validate CII results
+                if np.isinf(cii_result):
+                    cii_result = np.nan
+
+                row_data[f"CII {proc_name}/{ref_name}"] = cii_result
 
                 # 📝 TAMBAHKAN METRIK PERBANDINGAN ANTAR FOLDER DI SINI JUGA:
                 # Contoh untuk PSNR:
@@ -630,10 +759,9 @@ def process_single_image(args):
                 # row_data[f"PSNR {ref_name} vs {proc_name}"] = calculate_psnr(ref_gray, proc_gray)
             except Exception as e:
                 print(
-                    f"Warning: Failed to calculate CII for {ref_name} vs {proc_name}, image {img_num}: {e}"
+                    f"Warning: Failed to calculate CII for {proc_name}/{ref_name}, image {img_num}: {e}"
                 )
-                row_data[f"CII {proc_name} vs {ref_name}"] = np.nan
-                row_data[f"CII {ref_name} vs {proc_name}"] = np.nan
+                row_data[f"CII {proc_name}/{ref_name}"] = np.nan
 
     return row_data
 
@@ -643,7 +771,12 @@ def calculate_all_metrics_parallel(folder_paths, image_map, all_image_numbers, o
     Calculate metrics using parallel processing for better performance.
     """
     folder_names = {path: os.path.basename(path) for path in folder_paths}
-    cii_combinations = list(itertools.combinations(folder_paths, 2))
+    # Create combinations where later folder is processed, earlier is reference
+    cii_combinations = []
+    for i, proc_path in enumerate(folder_paths):
+        for j, ref_path in enumerate(folder_paths):
+            if i > j:  # Only if processed folder comes after reference folder
+                cii_combinations.append((ref_path, proc_path))
     use_parallel = options.get("use_parallel", False)
 
     # Prepare arguments for each image
@@ -701,6 +834,11 @@ def main():
         print("• EME - mengukur tingkat perbaikan gambar")
         print("• CII - membandingkan kontras antar gambar")
         print("")
+        print("📋 PENTING - Format Nama File:")
+        print("   Program akan membandingkan gambar berdasarkan nomor urut")
+        print("   Contoh: 1_xray1.jpg di folder A vs 1_rontgen.jpg di folder B")
+        print("   Format: NOMOR_NAMAFILE (nomor sama = gambar yang dibandingkan)")
+        print("")
         print("🔧 Info untuk Developer:")
         print("   Untuk menambahkan metrik baru, lihat:")
         print("   • File HOW_TO_ADD_METRICS.md - panduan lengkap")
@@ -720,7 +858,16 @@ def main():
         image_map, all_image_numbers = parse_image_files(folder_paths)
 
         if not all_image_numbers:
-            print("\nTidak ada gambar dengan format 'nomor_namafile' yang ditemukan.")
+            print("\n❌ TIDAK ADA GAMBAR DENGAN FORMAT YANG BENAR DITEMUKAN")
+            print("")
+            print("Silakan pastikan nama file gambar menggunakan format:")
+            print("NOMOR_NAMAFILE (contoh: 1_xray1.jpg, 2_rontgen.png)")
+            print("")
+            print("Tips perbaikan:")
+            print("• Ubah nama file menjadi: 1_[nama].jpg, 2_[nama].jpg, dst.")
+            print("• Pastikan nomor dimulai dari 1, 2, 3, ... (tanpa nol di depan)")
+            print("• Gunakan underscore (_) bukan tanda minus (-) atau spasi")
+            print("")
             return
 
         print(f"\nDitemukan {len(all_image_numbers)} nomor gambar unik")
@@ -755,6 +902,10 @@ def main():
 
         # 📝 TAMBAHKAN SORTING KOLOM METRIK BARU DI SINI:
         # your_metric_cols = sorted([col for col in df.columns if col.startswith("YOUR_METRIC")])
+
+        # 📝 UNTUK MENGUBAH NAMA HEADER KOLOM:
+        # df.columns = df.columns.str.replace('nama_panjang', 'nama_pendek')
+        # Contoh: df.columns = df.columns.str.replace('_images', '')
 
         df = df.reindex(columns=cols + ent_cols + eme_cols + cii_cols)
         # 📝 JANGAN LUPA UPDATE REINDEX INI JUGA:
