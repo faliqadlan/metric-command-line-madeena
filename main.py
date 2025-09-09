@@ -156,7 +156,8 @@ def create_roi_mask(image, method="otsu"):
         else:
             mask = np.ones_like(gray, dtype=np.uint8)
     except Exception as e:
-        print(f"Warning: Mask generation failed ({e}). Using full image mask.")
+        print(f"⚠️  Peringatan: Gagal membuat area fokus analisis")
+        print(f"   Program akan menganalisis seluruh gambar sebagai gantinya")
         mask = np.ones_like(gray, dtype=np.uint8)
 
     return mask
@@ -177,17 +178,17 @@ def validate_image_compatibility(img1, img2):
 
 def safe_imread(filepath):
     """
-    Safely read image with error handling and format support.
+    Membaca file gambar dengan aman dan penanganan error yang baik.
     """
     try:
         if not os.path.exists(filepath):
             return None
 
-        # Try reading with OpenCV
+        # Coba baca dengan OpenCV
         img = cv2.imread(filepath, cv2.IMREAD_UNCHANGED)
 
         if img is None:
-            # Try alternative approach for special formats
+            # Coba metode alternatif untuk format khusus
             try:
                 import imageio
 
@@ -199,7 +200,8 @@ def safe_imread(filepath):
 
         return img
     except Exception as e:
-        print(f"Warning: Failed to read {filepath}: {e}")
+        print(f"⚠️  Peringatan: Gagal membaca file {os.path.basename(filepath)}")
+        print(f"   Kemungkinan file rusak atau format tidak didukung")
         return None
 
 
@@ -212,90 +214,141 @@ logging.basicConfig(level=logging.WARNING)
 def get_folder_paths():
     """Meminta input path folder dari user secara berulang."""
     folder_paths = []
-    print("--- Masukkan Path Folder Gambar ---")
-    print("Ketik 's' atau 'selesai' untuk berhenti memasukkan path.")
+    print("=" * 50)
+    print("📁 PILIH FOLDER GAMBAR RONTGEN")
+    print("=" * 50)
+    print("Masukkan alamat folder yang berisi gambar rontgen Anda.")
+    print("Contoh: C:\\Users\\Nama\\Documents\\GambarRontgen")
+    print("")
+    print("💡 Tips: Anda bisa copy-paste alamat folder dari File Explorer")
+    print("   Ketik 's' atau 'selesai' jika sudah selesai menambah folder")
+    print("")
 
     while True:
         path = (
-            input(f"Masukkan path folder ke-{len(folder_paths) + 1}: ")
-            .strip()
-            .strip('"')
+            input(f"📂 Alamat folder ke-{len(folder_paths) + 1}: ").strip().strip('"')
         )  # Hapus kutip jika ada
 
         if path.lower() in ["s", "selesai"]:
             if not folder_paths:
-                print("Tidak ada folder yang dimasukkan. Program berhenti.")
+                print("❌ Belum ada folder yang dipilih. Program akan berhenti.")
                 return None
             break
 
         if os.path.isdir(path):
             folder_paths.append(path)
-            print(f"-> Folder '{os.path.basename(path)}' ditambahkan.")
+            print(f"✅ Folder '{os.path.basename(path)}' berhasil ditambahkan.")
         else:
-            print(f"Error: Path '{path}' tidak valid. Silakan coba lagi.")
+            print(f"❌ Alamat folder tidak ditemukan: '{path}'")
+            print("   Silakan periksa kembali alamat folder Anda.")
 
-    if len(folder_paths) > 5:
+    if len(folder_paths) > 3:
         total_images = sum(
             len(files)
             for _, _, files in itertools.chain.from_iterable(
                 os.walk(p) for p in folder_paths
             )
         )
-        print("\n[PERINGATAN]")
+        print(f"\n⚠️  PERINGATAN:")
         print(
-            f"Anda memasukkan {len(folder_paths)} folder dengan total sekitar {total_images} file."
+            f"   Anda memilih {len(folder_paths)} folder dengan sekitar {total_images} file."
         )
-        print("Proses kalkulasi, terutama CII, mungkin akan memakan waktu cukup lama.")
+        print(f"   Proses analisis mungkin membutuhkan waktu yang cukup lama.")
+        print(f"   Pastikan komputer Anda tidak dalam mode sleep/hibernate.")
 
     return folder_paths
 
 
 def get_mask_method():
     """Meminta user memilih metode masking untuk CII."""
-    print("\n--- Opsi Masking untuk CII ---")
-    print("1. None (seluruh gambar)")
-    print("2. Otsu thresholding")
-    print("3. Adaptive thresholding")
-    print("4. Percentile-based (75%)")
+    print("\n" + "=" * 40)
+    print("🎯 PILIHAN AREA ANALISIS GAMBAR")
+    print("=" * 40)
+    print("Program dapat menganalisis bagian tertentu dari gambar rontgen:")
+    print("")
+    print("1. 📊 Seluruh Gambar (Direkomendasikan untuk pemula)")
+    print("   → Menganalisis semua bagian gambar rontgen")
+    print("")
+    print("2. 🔍 Otsu Otomatis")
+    print("   → Program otomatis memilih area penting")
+    print("")
+    print("3. 🎨 Adaptif Cerdas")
+    print("   → Menyesuaikan dengan kondisi gambar")
+    print("")
+    print("4. 📈 Berdasarkan Kecerahan (75%)")
+    print("   → Fokus pada area terang gambar")
+    print("")
 
     while True:
         try:
-            choice = input("Pilih metode masking (1-4) [default: 1]: ").strip()
+            choice = input(
+                "🤔 Pilihan Anda (1-4) [tekan Enter untuk pilihan 1]: "
+            ).strip()
             if not choice:
+                print("✅ Dipilih: Seluruh Gambar")
                 return "none"
 
             choice = int(choice)
             if choice == 1:
+                print("✅ Dipilih: Seluruh Gambar")
                 return "none"
             elif choice == 2:
+                print("✅ Dipilih: Otsu Otomatis")
                 return "otsu"
             elif choice == 3:
+                print("✅ Dipilih: Adaptif Cerdas")
                 return "adaptive"
             elif choice == 4:
+                print("✅ Dipilih: Berdasarkan Kecerahan")
                 return "percentile"
             else:
-                print("Pilihan tidak valid. Masukkan angka 1-4.")
+                print("❌ Nomor tidak valid. Silakan pilih angka 1, 2, 3, atau 4.")
         except ValueError:
-            print("Input tidak valid. Masukkan angka 1-4.")
+            print("❌ Harap masukkan angka saja (1, 2, 3, atau 4).")
 
 
 def get_processing_options():
     """Meminta user memilih opsi pemrosesan tambahan."""
-    print("\n--- Opsi Pemrosesan ---")
+    print("\n" + "=" * 45)
+    print("⚙️  PENGATURAN ANALISIS GAMBAR")
+    print("=" * 45)
 
     # EME parameters
+    print("📐 Pengaturan Analisis Detail (EME)")
+    print("   Nilai ini menentukan seberapa detail analisis dilakukan")
+    print("   Nilai lebih tinggi = analisis lebih detail (tapi lebih lama)")
+    print("")
+
     try:
-        r = int(input("Masukkan nilai r untuk EME [default: 4]: ") or "4")
-        c = int(input("Masukkan nilai c untuk EME [default: 4]: ") or "4")
+        r = int(
+            input("🔢 Pembagian vertikal gambar [biarkan kosong untuk nilai 4]: ")
+            or "4"
+        )
+        c = int(
+            input("🔢 Pembagian horizontal gambar [biarkan kosong untuk nilai 4]: ")
+            or "4"
+        )
+        print(f"✅ Menggunakan pembagian: {r} x {c} blok")
     except ValueError:
         r, c = 4, 4
-        print("Menggunakan nilai default r=4, c=4")
+        print("✅ Menggunakan pengaturan standar: 4 x 4 blok")
+
+    print("\n⚡ Kecepatan Pemrosesan")
+    print("   Pemrosesan paralel dapat mempercepat analisis")
+    print("   Cocok jika Anda memiliki banyak gambar (>50 gambar)")
 
     # Parallel processing
     use_parallel = (
-        input("Gunakan pemrosesan paralel? (y/n) [default: n]: ").strip().lower()
+        input("🚀 Aktifkan pemrosesan cepat? (y/n) [biarkan kosong untuk 'tidak']: ")
+        .strip()
+        .lower()
     )
-    use_parallel = use_parallel in ["y", "yes"]
+    use_parallel = use_parallel in ["y", "yes", "ya"]
+
+    if use_parallel:
+        print("✅ Pemrosesan cepat diaktifkan")
+    else:
+        print("✅ Menggunakan pemrosesan standar")
 
     return {"eme_r": r, "eme_c": c, "use_parallel": use_parallel}
 
@@ -332,7 +385,8 @@ def parse_image_files(folder_paths):
                 except (ValueError, IndexError):
                     continue
         except OSError as e:
-            print(f"Warning: Cannot access folder {folder}: {e}")
+            print(f"⚠️  Tidak dapat mengakses folder: {os.path.basename(folder)}")
+            print(f"   Kemungkinan folder terkunci atau tidak ada izin akses")
             continue
 
     return image_map, sorted(list(all_image_numbers))
@@ -380,10 +434,11 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                 )
             except Exception as e:
                 print(
-                    f"Warning: Failed to calculate metrics for {folder_name}, image {img_num}: {e}"
+                    f"⚠️  Gagal menganalisis gambar {img_num} dari folder {folder_name}"
                 )
-                row_data[f"ENT {folder_name}"] = np.nan
-                row_data[f"EME {folder_name}"] = np.nan
+                print(f"   Kemungkinan format gambar tidak sesuai atau file rusak")
+                row_data[f"ENT {folder_name}"] = "ERROR"
+                row_data[f"EME {folder_name}"] = "ERROR"
 
         # 2. Hitung CII antar folder
         for ref_path, proc_path in cii_combinations:
@@ -397,10 +452,15 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                 is_compatible, message = validate_image_compatibility(ref_img, proc_img)
                 if not is_compatible:
                     print(
-                        f"Warning: Images incompatible for CII calculation ({message})"
+                        f"⚠️  Gambar {img_num}: Tidak bisa dibandingkan antara {ref_name} dan {proc_name}"
                     )
-                    row_data[f"CII {proc_name} vs {ref_name}"] = np.nan
-                    row_data[f"CII {ref_name} vs {proc_name}"] = np.nan
+                    print(f"   Alasan: Ukuran atau format gambar berbeda")
+                    row_data[f"CII {proc_name} vs {ref_name}"] = (
+                        "TIDAK BISA DIBANDINGKAN"
+                    )
+                    row_data[f"CII {ref_name} vs {proc_name}"] = (
+                        "TIDAK BISA DIBANDINGKAN"
+                    )
                     continue
 
                 try:
@@ -543,7 +603,8 @@ def calculate_all_metrics_parallel(folder_paths, image_map, all_image_numbers, o
         max_workers = min(
             4, os.cpu_count() or 1
         )  # Limit workers to prevent memory issues
-        print(f"Using parallel processing with {max_workers} workers...")
+        print(f"🚀 Menggunakan pemrosesan cepat dengan {max_workers} proses paralel...")
+        print("   Silakan tunggu, proses sedang berjalan...")
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
@@ -572,6 +633,18 @@ def calculate_all_metrics_parallel(folder_paths, image_map, all_image_numbers, o
 def main():
     """Fungsi utama untuk menjalankan seluruh proses."""
     try:
+        print("🏥" + "=" * 60 + "🏥")
+        print("     PROGRAM ANALISIS KUALITAS GAMBAR RONTGEN")
+        print("        Mengukur Entropi, EME, dan CII")
+        print("🏥" + "=" * 60 + "🏥")
+        print("")
+        print("Selamat datang! Program ini akan membantu Anda menganalisis")
+        print("kualitas gambar rontgen dengan menghitung metrik:")
+        print("• ENT (Entropi) - mengukur detail informasi gambar")
+        print("• EME - mengukur tingkat perbaikan gambar")
+        print("• CII - membandingkan kontras antar gambar")
+        print("")
+
         folder_paths = get_folder_paths()
         if not folder_paths:
             return
