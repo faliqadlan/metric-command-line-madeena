@@ -5,6 +5,8 @@ import pandas as pd
 from tqdm import tqdm
 import itertools
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 # --- FUNGSI KALKULASI METRIK ---
 # Fungsi-fungsi ini sekarang menjadi bagian dari script utama.
@@ -112,6 +114,95 @@ def calculate_eme(image, r, c, epsilon=1e-4):
     return eme
 
 
+def create_roi_mask(image, method="otsu"):
+    """
+    Membuat mask ROI (Region of Interest) untuk analisis yang lebih akurat.
+
+    Args:
+        image: Input image
+        method: Method untuk thresholding ("otsu", "adaptive", "percentile", "none")
+
+    Returns:
+        Binary mask array
+    """
+    if method == "none":
+        return np.ones_like(image, dtype=np.uint8)
+
+    # Convert to grayscale if needed
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image.copy()
+
+    # Normalize to 8-bit for thresholding operations
+    if gray.dtype != np.uint8:
+        gray = cv2.convertScaleAbs(gray)
+
+    try:
+        if method == "otsu":
+            _, mask = cv2.threshold(gray, 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        elif method == "adaptive":
+            mask = cv2.adaptiveThreshold(
+                gray,
+                1,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY,
+                11,
+                2,
+            )
+        elif method == "percentile":
+            threshold = np.percentile(gray, 75)
+            mask = (gray > threshold).astype(np.uint8)
+        else:
+            mask = np.ones_like(gray, dtype=np.uint8)
+    except Exception as e:
+        print(f"Warning: Mask generation failed ({e}). Using full image mask.")
+        mask = np.ones_like(gray, dtype=np.uint8)
+
+    return mask
+
+
+def validate_image_compatibility(img1, img2):
+    """
+    Memvalidasi kompatibilitas dua gambar untuk perhitungan metrik.
+    """
+    if img1 is None or img2 is None:
+        return False, "One or both images are None"
+
+    if img1.shape != img2.shape:
+        return False, f"Shape mismatch: {img1.shape} vs {img2.shape}"
+
+    return True, "Compatible"
+
+
+def safe_imread(filepath):
+    """
+    Safely read image with error handling and format support.
+    """
+    try:
+        if not os.path.exists(filepath):
+            return None
+
+        # Try reading with OpenCV
+        img = cv2.imread(filepath, cv2.IMREAD_UNCHANGED)
+
+        if img is None:
+            # Try alternative approach for special formats
+            try:
+                import imageio
+
+                img = imageio.imread(filepath)
+                if len(img.shape) == 3 and img.shape[2] == 3:
+                    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            except:
+                return None
+
+        return img
+    except Exception as e:
+        print(f"Warning: Failed to read {filepath}: {e}")
+        return None
+
+
 # --- LOGIKA PROGRAM UTAMA ---
 
 # Konfigurasi logging untuk menekan pesan yang tidak perlu
@@ -159,47 +250,140 @@ def get_folder_paths():
     return folder_paths
 
 
+def get_mask_method():
+    """Meminta user memilih metode masking untuk CII."""
+    print("\n--- Opsi Masking untuk CII ---")
+    print("1. None (seluruh gambar)")
+    print("2. Otsu thresholding")
+    print("3. Adaptive thresholding")
+    print("4. Percentile-based (75%)")
+
+    while True:
+        try:
+            choice = input("Pilih metode masking (1-4) [default: 1]: ").strip()
+            if not choice:
+                return "none"
+
+            choice = int(choice)
+            if choice == 1:
+                return "none"
+            elif choice == 2:
+                return "otsu"
+            elif choice == 3:
+                return "adaptive"
+            elif choice == 4:
+                return "percentile"
+            else:
+                print("Pilihan tidak valid. Masukkan angka 1-4.")
+        except ValueError:
+            print("Input tidak valid. Masukkan angka 1-4.")
+
+
+def get_processing_options():
+    """Meminta user memilih opsi pemrosesan tambahan."""
+    print("\n--- Opsi Pemrosesan ---")
+
+    # EME parameters
+    try:
+        r = int(input("Masukkan nilai r untuk EME [default: 4]: ") or "4")
+        c = int(input("Masukkan nilai c untuk EME [default: 4]: ") or "4")
+    except ValueError:
+        r, c = 4, 4
+        print("Menggunakan nilai default r=4, c=4")
+
+    # Parallel processing
+    use_parallel = (
+        input("Gunakan pemrosesan paralel? (y/n) [default: n]: ").strip().lower()
+    )
+    use_parallel = use_parallel in ["y", "yes"]
+
+    return {"eme_r": r, "eme_c": c, "use_parallel": use_parallel}
+
+
+def get_supported_extensions():
+    """Mengembalikan ekstensi file yang didukung."""
+    return {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".dcm", ".dicom"}
+
+
 def parse_image_files(folder_paths):
     """Memindai folder dan memetakan gambar berdasarkan nomornya."""
     image_map = {path: {} for path in folder_paths}
     all_image_numbers = set()
+    supported_extensions = get_supported_extensions()
 
     print("\nMemindai file gambar...")
     for folder in tqdm(folder_paths, desc="Memindai Folder", unit="folder"):
-        for filename in os.listdir(folder):
-            try:
-                parts = filename.split("_", 1)
-                if len(parts) == 2 and parts[0].isdigit():
-                    img_num = int(parts[0])
-                    img_path = os.path.join(folder, filename)
-                    image_map[folder][img_num] = img_path
-                    all_image_numbers.add(img_num)
-            except (ValueError, IndexError):
-                continue
+        try:
+            for filename in os.listdir(folder):
+                # Check file extension
+                file_ext = os.path.splitext(filename)[1].lower()
+                if file_ext not in supported_extensions:
+                    continue
+
+                try:
+                    parts = filename.split("_", 1)
+                    if len(parts) == 2 and parts[0].isdigit():
+                        img_num = int(parts[0])
+                        img_path = os.path.join(folder, filename)
+                        # Verify file exists and is readable
+                        if os.path.isfile(img_path):
+                            image_map[folder][img_num] = img_path
+                            all_image_numbers.add(img_num)
+                except (ValueError, IndexError):
+                    continue
+        except OSError as e:
+            print(f"Warning: Cannot access folder {folder}: {e}")
+            continue
 
     return image_map, sorted(list(all_image_numbers))
 
 
-def calculate_all_metrics(folder_paths, image_map, all_image_numbers):
+def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
     """Menghitung semua metrik untuk gambar yang cocok dan menampilkan progress."""
     results = []
     folder_names = {path: os.path.basename(path) for path in folder_paths}
     cii_combinations = list(itertools.combinations(folder_paths, 2))
 
+    eme_r = options.get("eme_r", 4)
+    eme_c = options.get("eme_c", 4)
+    mask_method = options.get("mask_method", "none")
+
     for img_num in tqdm(all_image_numbers, desc="Menghitung Metrik", unit="gambar"):
         row_data = {"no gambar": img_num}
         images = {}
 
+        # Load images with error handling
         for path in folder_paths:
             if img_num in image_map[path]:
                 img_path = image_map[path][img_num]
-                images[path] = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+                img = safe_imread(img_path)
+                if img is not None:
+                    images[path] = img
+
+        # Skip if no images loaded for this number
+        if not images:
+            continue
 
         # 1. Hitung ENT dan EME
         for path, img in images.items():
             folder_name = folder_names[path]
-            row_data[f"ENT {folder_name}"] = calculate_entropy(img)
-            row_data[f"EME {folder_name}"] = calculate_eme(img, r=4, c=4)
+            try:
+                # Convert to grayscale for metric calculations
+                if len(img.shape) == 3:
+                    gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                else:
+                    gray_img = img
+
+                row_data[f"ENT {folder_name}"] = calculate_entropy(gray_img)
+                row_data[f"EME {folder_name}"] = calculate_eme(
+                    gray_img, r=eme_r, c=eme_c
+                )
+            except Exception as e:
+                print(
+                    f"Warning: Failed to calculate metrics for {folder_name}, image {img_num}: {e}"
+                )
+                row_data[f"ENT {folder_name}"] = np.nan
+                row_data[f"EME {folder_name}"] = np.nan
 
         # 2. Hitung CII antar folder
         for ref_path, proc_path in cii_combinations:
@@ -208,16 +392,179 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers):
 
             if ref_path in images and proc_path in images:
                 ref_img, proc_img = images[ref_path], images[proc_path]
-                mask = np.ones_like(ref_img, dtype=np.uint8)
 
-                row_data[f"CII {proc_name} vs {ref_name}"] = calculate_cii(
-                    proc_img, ref_img, mask
-                )
-                row_data[f"CII {ref_name} vs {proc_name}"] = calculate_cii(
-                    ref_img, proc_img, mask
-                )
+                # Validate image compatibility
+                is_compatible, message = validate_image_compatibility(ref_img, proc_img)
+                if not is_compatible:
+                    print(
+                        f"Warning: Images incompatible for CII calculation ({message})"
+                    )
+                    row_data[f"CII {proc_name} vs {ref_name}"] = np.nan
+                    row_data[f"CII {ref_name} vs {proc_name}"] = np.nan
+                    continue
+
+                try:
+                    # Convert to grayscale if needed
+                    if len(ref_img.shape) == 3:
+                        ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
+                        proc_gray = cv2.cvtColor(proc_img, cv2.COLOR_BGR2GRAY)
+                    else:
+                        ref_gray = ref_img
+                        proc_gray = proc_img
+
+                    # Create mask
+                    mask = create_roi_mask(ref_gray, method=mask_method)
+
+                    row_data[f"CII {proc_name} vs {ref_name}"] = calculate_cii(
+                        proc_gray, ref_gray, mask
+                    )
+                    row_data[f"CII {ref_name} vs {proc_name}"] = calculate_cii(
+                        ref_gray, proc_gray, mask
+                    )
+                except Exception as e:
+                    print(
+                        f"Warning: Failed to calculate CII for {ref_name} vs {proc_name}, image {img_num}: {e}"
+                    )
+                    row_data[f"CII {proc_name} vs {ref_name}"] = np.nan
+                    row_data[f"CII {ref_name} vs {proc_name}"] = np.nan
 
         results.append(row_data)
+
+    return results
+
+
+def process_single_image(args):
+    """
+    Process metrics for a single image number - used for parallel processing.
+    """
+    img_num, folder_paths, image_map, folder_names, cii_combinations, options = args
+
+    eme_r = options.get("eme_r", 4)
+    eme_c = options.get("eme_c", 4)
+    mask_method = options.get("mask_method", "none")
+
+    row_data = {"no gambar": img_num}
+    images = {}
+
+    # Load images with error handling
+    for path in folder_paths:
+        if img_num in image_map[path]:
+            img_path = image_map[path][img_num]
+            img = safe_imread(img_path)
+            if img is not None:
+                images[path] = img
+
+    # Skip if no images loaded for this number
+    if not images:
+        return None
+
+    # 1. Hitung ENT dan EME
+    for path, img in images.items():
+        folder_name = folder_names[path]
+        try:
+            # Convert to grayscale for metric calculations
+            if len(img.shape) == 3:
+                gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            else:
+                gray_img = img
+
+            row_data[f"ENT {folder_name}"] = calculate_entropy(gray_img)
+            row_data[f"EME {folder_name}"] = calculate_eme(gray_img, r=eme_r, c=eme_c)
+        except Exception as e:
+            print(
+                f"Warning: Failed to calculate metrics for {folder_name}, image {img_num}: {e}"
+            )
+            row_data[f"ENT {folder_name}"] = np.nan
+            row_data[f"EME {folder_name}"] = np.nan
+
+    # 2. Hitung CII antar folder
+    for ref_path, proc_path in cii_combinations:
+        ref_name = folder_names[ref_path]
+        proc_name = folder_names[proc_path]
+
+        if ref_path in images and proc_path in images:
+            ref_img, proc_img = images[ref_path], images[proc_path]
+
+            # Validate image compatibility
+            is_compatible, message = validate_image_compatibility(ref_img, proc_img)
+            if not is_compatible:
+                print(f"Warning: Images incompatible for CII calculation ({message})")
+                row_data[f"CII {proc_name} vs {ref_name}"] = np.nan
+                row_data[f"CII {ref_name} vs {proc_name}"] = np.nan
+                continue
+
+            try:
+                # Convert to grayscale if needed
+                if len(ref_img.shape) == 3:
+                    ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
+                    proc_gray = cv2.cvtColor(proc_img, cv2.COLOR_BGR2GRAY)
+                else:
+                    ref_gray = ref_img
+                    proc_gray = proc_img
+
+                # Create mask
+                mask = create_roi_mask(ref_gray, method=mask_method)
+
+                row_data[f"CII {proc_name} vs {ref_name}"] = calculate_cii(
+                    proc_gray, ref_gray, mask
+                )
+                row_data[f"CII {ref_name} vs {proc_name}"] = calculate_cii(
+                    ref_gray, proc_gray, mask
+                )
+            except Exception as e:
+                print(
+                    f"Warning: Failed to calculate CII for {ref_name} vs {proc_name}, image {img_num}: {e}"
+                )
+                row_data[f"CII {proc_name} vs {ref_name}"] = np.nan
+                row_data[f"CII {ref_name} vs {proc_name}"] = np.nan
+
+    return row_data
+
+
+def calculate_all_metrics_parallel(folder_paths, image_map, all_image_numbers, options):
+    """
+    Calculate metrics using parallel processing for better performance.
+    """
+    folder_names = {path: os.path.basename(path) for path in folder_paths}
+    cii_combinations = list(itertools.combinations(folder_paths, 2))
+    use_parallel = options.get("use_parallel", False)
+
+    # Prepare arguments for each image
+    args_list = []
+    for img_num in all_image_numbers:
+        args_list.append(
+            (img_num, folder_paths, image_map, folder_names, cii_combinations, options)
+        )
+
+    results = []
+
+    if use_parallel and len(args_list) > 1:
+        # Use parallel processing
+        max_workers = min(
+            4, os.cpu_count() or 1
+        )  # Limit workers to prevent memory issues
+        print(f"Using parallel processing with {max_workers} workers...")
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(process_single_image, args) for args in args_list
+            ]
+
+            for future in tqdm(
+                as_completed(futures), total=len(futures), desc="Processing Images"
+            ):
+                try:
+                    result = future.result()
+                    if result is not None:
+                        results.append(result)
+                except Exception as e:
+                    print(f"Error processing image: {e}")
+    else:
+        # Sequential processing
+        for args in tqdm(args_list, desc="Menghitung Metrik", unit="gambar"):
+            result = process_single_image(args)
+            if result is not None:
+                results.append(result)
 
     return results
 
@@ -229,15 +576,40 @@ def main():
         if not folder_paths:
             return
 
+        # Get user preferences
+        mask_method = get_mask_method()
+        processing_options = get_processing_options()
+        processing_options["mask_method"] = mask_method
+
         image_map, all_image_numbers = parse_image_files(folder_paths)
 
         if not all_image_numbers:
             print("\nTidak ada gambar dengan format 'nomor_namafile' yang ditemukan.")
             return
 
-        results_data = calculate_all_metrics(folder_paths, image_map, all_image_numbers)
+        print(f"\nDitemukan {len(all_image_numbers)} nomor gambar unik")
+        total_possible = len(all_image_numbers) * len(folder_paths)
+        print(f"Memulai kalkulasi metrik untuk maksimal {total_possible} gambar...")
 
-        output_filename = "metrics_results.csv"
+        if processing_options.get("use_parallel", False):
+            results_data = calculate_all_metrics_parallel(
+                folder_paths, image_map, all_image_numbers, processing_options
+            )
+        else:
+            results_data = calculate_all_metrics(
+                folder_paths, image_map, all_image_numbers, processing_options
+            )
+
+        if not results_data:
+            print(
+                "\nTidak ada data hasil kalkulasi yang berhasil. Periksa format file dan path folder."
+            )
+            return
+
+        # Generate timestamped filename
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        output_filename = f"metrics_results_{timestamp}.csv"
+
         df = pd.DataFrame(results_data)
 
         cols = ["no gambar"]
@@ -251,9 +623,16 @@ def main():
         print(
             f"\nProses selesai! Hasil disimpan di '{os.path.abspath(output_filename)}'"
         )
+        print(f"Total baris data: {len(df)}")
+        print(f"Kolom yang dihasilkan: {len(df.columns)}")
 
+    except KeyboardInterrupt:
+        print("\n\nProses dibatalkan oleh user.")
     except Exception as e:
         print(f"\nTerjadi error: {e}")
+        import traceback
+
+        traceback.print_exc()
     finally:
         input("\nTekan Enter untuk keluar.")
 
