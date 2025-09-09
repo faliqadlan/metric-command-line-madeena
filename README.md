@@ -1,4 +1,3 @@
-# filepath: c:\Users\faliq\OneDrive - UGM 365\x-ray-madeena\metric-command-line-madeena\README.md
 # 🏥 Program Analisis Kualitas Gambar Rontgen
 
 Program berbasis Python untuk menganalisis kualitas gambar rontgen dengan menghitung berbagai metrik kualitas gambar seperti Entropi (ENT), Effective Measure of Enhancement (EME), dan Contrast Improvement Index (CII).

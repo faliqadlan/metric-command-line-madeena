@@ -1,4 +1,3 @@
-# filepath: c:\Users\faliq\OneDrive - UGM 365\x-ray-madeena\metric-command-line-madeena\NAMING_FORMAT_GUIDE.md
 # PANDUAN FORMAT NAMA FILE GAMBAR
 
 ## 🎯 Mengapa Format Nama File Penting?
