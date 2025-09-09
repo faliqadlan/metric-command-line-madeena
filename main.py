@@ -574,11 +574,16 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
         # Logika: folder yang diinput belakangan (processed) dibagi folder yang diinput lebih dulu (reference)
         for i, proc_path in enumerate(folder_paths):
             for j, ref_path in enumerate(folder_paths):
-                if i <= j:  # Skip jika processed tidak lebih belakangan dari reference
+                if i < j:  # Skip jika processed tidak lebih belakangan dari reference
                     continue
 
                 proc_name = folder_names[proc_path]  # folder belakangan = processed
                 ref_name = folder_names[ref_path]  # folder lebih dulu = reference
+
+                # Jika folder sama, CII = 1.0 (gambar sama dengan dirinya sendiri)
+                if proc_path == ref_path:
+                    row_data[f"CII {proc_name}/{ref_name}"] = 1.0
+                    continue
 
                 if ref_path in images and proc_path in images:
                     ref_img, proc_img = images[ref_path], images[proc_path]
@@ -709,6 +714,11 @@ def process_single_image(args):
         ref_name = folder_names[ref_path]  # reference (earlier folder)
         proc_name = folder_names[proc_path]  # processed (later folder)
 
+        # Jika folder sama, CII = 1.0 (gambar sama dengan dirinya sendiri)
+        if ref_path == proc_path:
+            row_data[f"CII {proc_name}/{ref_name}"] = 1.0
+            continue
+
         if ref_path in images and proc_path in images:
             ref_img, proc_img = images[ref_path], images[proc_path]
 
@@ -771,11 +781,11 @@ def calculate_all_metrics_parallel(folder_paths, image_map, all_image_numbers, o
     Calculate metrics using parallel processing for better performance.
     """
     folder_names = {path: os.path.basename(path) for path in folder_paths}
-    # Create combinations where later folder is processed, earlier is reference
+    # Create combinations for all folder pairs (including same folder)
     cii_combinations = []
     for i, proc_path in enumerate(folder_paths):
         for j, ref_path in enumerate(folder_paths):
-            if i > j:  # Only if processed folder comes after reference folder
+            if i >= j:  # Include same folder (i == j) and later folders (i > j)
                 cii_combinations.append((ref_path, proc_path))
     use_parallel = options.get("use_parallel", False)
 
@@ -925,9 +935,52 @@ def main():
         import traceback
 
         traceback.print_exc()
-    finally:
-        input("\nTekan Enter untuk keluar.")
+
+
+def run_program():
+    """Menjalankan program dengan opsi untuk mengulang."""
+    while True:
+        try:
+            main()
+
+            print("\n" + "=" * 50)
+            print("🔄 PROGRAM SELESAI")
+            print("=" * 50)
+
+            while True:
+                choice = (
+                    input("\nIngin menjalankan analisis lagi? (y/n): ").strip().lower()
+                )
+                if choice in ["y", "yes", "ya"]:
+                    print("\n" + "🔄 " * 20)
+                    print("   MEMULAI ANALISIS BARU")
+                    print("🔄 " * 20 + "\n")
+                    break
+                elif choice in ["n", "no", "tidak"]:
+                    print("\n✅ Terima kasih telah menggunakan program ini!")
+                    print("📧 Jika ada pertanyaan, silakan hubungi developer.")
+                    input("\nTekan Enter untuk keluar...")
+                    return
+                else:
+                    print(
+                        "❌ Pilihan tidak valid. Ketik 'y' untuk ya atau 'n' untuk tidak."
+                    )
+
+        except KeyboardInterrupt:
+            print("\n\n⚠️  Program dihentikan oleh user.")
+            choice = input("Ingin keluar? (y/n): ").strip().lower()
+            if choice in ["y", "yes", "ya"]:
+                break
+        except Exception as e:
+            print(f"\n❌ Terjadi error yang tidak terduga: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+            choice = input("\nIngin mencoba lagi? (y/n): ").strip().lower()
+            if choice not in ["y", "yes", "ya"]:
+                break
 
 
 if __name__ == "__main__":
-    main()
+    run_program()
