@@ -187,6 +187,267 @@ def calculate_eme(image, r, c, epsilon=1e-4):
     return eme
 
 
+# Add new metric functions here
+def calculate_contrast_uniformity(gray_values):
+    """
+    Menghitung uniformitas kontras dari sebuah Region of Interest (ROI).
+
+    Fungsi ini mengukur konsistensi nilai gray dalam material yang seharusnya
+    homogen. Uniformitas ditentukan dengan menghitung mean absolute deviation
+    sebagai persentase dari mean gray value.
+    """
+    try:
+        if not isinstance(gray_values, np.ndarray):
+            gray_values = np.array(gray_values)
+
+        if gray_values.size == 0:
+            return np.nan
+
+        mean_value = np.mean(gray_values)
+        if mean_value == 0:
+            return np.nan
+
+        # Calculate the mean absolute deviation
+        mean_deviation = np.mean(np.abs(gray_values - mean_value))
+
+        # Calculate the percentage of the mean deviation
+        percentage_deviation = (mean_deviation / mean_value) * 100
+        return float(percentage_deviation)
+    except Exception as e:
+        print(f"⚠️  Error dalam kalkulasi uniformitas kontras: {e}")
+        return np.nan
+
+
+def calculate_snr(signal_intensity, background_std_dev):
+    """
+    Menghitung Signal-to-Noise Ratio (SNR).
+
+    SNR membandingkan level sinyal yang diinginkan dengan level noise latar belakang.
+    Formula: SNR = I_s / σ_bg
+    """
+    try:
+        if background_std_dev == 0:
+            return np.inf
+
+        snr = signal_intensity / background_std_dev
+        return float(snr) if np.isfinite(snr) else np.nan
+    except Exception as e:
+        print(f"⚠️  Error dalam kalkulasi SNR: {e}")
+        return np.nan
+
+
+def calculate_cnr(signal_intensity, background_intensity, background_std_dev):
+    """
+    Menghitung Contrast-to-Noise Ratio (CNR).
+
+    CNR mengukur kontras antara objek dan latar belakangnya relatif terhadap
+    noise di latar belakang. Formula: CNR = |I_s - I_bg| / σ_bg
+    """
+    try:
+        if background_std_dev == 0:
+            return np.inf
+
+        cnr = abs(signal_intensity - background_intensity) / background_std_dev
+        return float(cnr) if np.isfinite(cnr) else np.nan
+    except Exception as e:
+        print(f"⚠️  Error dalam kalkulasi CNR: {e}")
+        return np.nan
+
+
+def calculate_fwhm_from_sigma(sigma):
+    """
+    Menghitung Full Width at Half Maximum (FWHM) dari standard deviation.
+
+    FWHM adalah ukuran kunci dari resolusi spasial.
+    Formula: FWHM = 2 * sqrt(2 * ln(2)) * σ ≈ 2.355 * σ
+    """
+    try:
+        fwhm = 2 * np.sqrt(2 * np.log(2)) * sigma
+        return float(fwhm)
+    except Exception as e:
+        print(f"⚠️  Error dalam kalkulasi FWHM: {e}")
+        return np.nan
+
+
+def calculate_mtf_from_lsf(lsf):
+    """
+    Menghitung Modulation Transfer Function (MTF) dari Line Spread Function (LSF).
+
+    MTF mendeskripsikan seberapa baik sistem imaging mempertahankan kontras
+    objek across berbagai spatial frequencies.
+    """
+    try:
+        if not isinstance(lsf, np.ndarray) or lsf.ndim != 1 or lsf.size == 0:
+            return np.array([]), np.array([])
+
+        # Calculate OTF (Optical Transfer Function)
+        otf = np.fft.fftshift(np.fft.fft(lsf))
+
+        # MTF is the magnitude of OTF
+        mtf = np.abs(otf)
+
+        # Normalize MTF
+        dc_component = mtf[len(mtf) // 2]
+        if dc_component > 1e-9:
+            mtf_normalized = mtf / dc_component
+        else:
+            mtf_normalized = mtf
+
+        # Calculate corresponding spatial frequencies
+        frequencies = np.fft.fftshift(np.fft.fftfreq(lsf.size))
+
+        return frequencies, mtf_normalized
+    except Exception as e:
+        print(f"⚠️  Error dalam kalkulasi MTF: {e}")
+        return np.array([]), np.array([])
+
+
+def calculate_dic_displacement(
+    reference_image, deformed_image, subset_center, subset_size
+):
+    """
+    Menghitung displacement dari subset menggunakan Digital Image Correlation (DIC).
+
+    DIC adalah teknik optik non-contact yang mengukur full-field displacement
+    dengan tracking pola random pada permukaan specimen.
+    """
+    try:
+        if subset_size % 2 == 0:
+            print("⚠️  Ukuran subset harus bilangan ganjil")
+            return None, None
+
+        # Define the top-left corner of the subset
+        half_size = subset_size // 2
+        top_left_x = subset_center[0] - half_size
+        top_left_y = subset_center[1] - half_size
+
+        # Check bounds
+        if (
+            top_left_x < 0
+            or top_left_y < 0
+            or top_left_x + subset_size >= reference_image.shape[1]
+            or top_left_y + subset_size >= reference_image.shape[0]
+        ):
+            return None, None
+
+        # Extract the subset from reference image
+        subset = reference_image[
+            top_left_y : top_left_y + subset_size, top_left_x : top_left_x + subset_size
+        ]
+
+        # Perform template matching
+        result = cv2.matchTemplate(deformed_image, subset, cv2.TM_CCOEFF_NORMED)
+
+        # Find the location of the best match
+        _, _, _, max_loc = cv2.minMaxLoc(result)
+
+        # Calculate displacement
+        new_top_left_x, new_top_left_y = max_loc
+        dx = new_top_left_x - top_left_x
+        dy = new_top_left_y - top_left_y
+
+        return float(dx), float(dy)
+    except Exception as e:
+        print(f"⚠️  Error dalam kalkulasi DIC displacement: {e}")
+        return None, None
+
+
+def calculate_advanced_metrics(image):
+    """
+    Menghitung metrik lanjutan untuk gambar (uniformitas, SNR, CNR, dll).
+    """
+    try:
+        # Convert to grayscale if needed
+        if len(image.shape) == 3:
+            gray_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray_img = image.copy()
+
+        results = {}
+
+        # Calculate uniformity using entire image as ROI
+        gray_values = gray_img.flatten()
+        results["uniformity"] = calculate_contrast_uniformity(gray_values)
+
+        # Calculate SNR and CNR using center vs edge regions
+        h, w = gray_img.shape
+        center_h, center_w = h // 4, w // 4
+
+        # Signal region (center)
+        signal_region = gray_img[center_h : h - center_h, center_w : w - center_w]
+        signal_mean = np.mean(signal_region.astype(np.float64))
+
+        # Background region (edges)
+        background_mask = np.ones_like(gray_img, dtype=bool)
+        background_mask[center_h : h - center_h, center_w : w - center_w] = False
+        background_region = gray_img[background_mask]
+
+        if background_region.size > 0:
+            background_mean = np.mean(background_region.astype(np.float64))
+            background_std = np.std(background_region.astype(np.float64))
+
+            results["snr"] = calculate_snr(signal_mean, background_std)
+            results["cnr"] = calculate_cnr(signal_mean, background_mean, background_std)
+        else:
+            results["snr"] = np.nan
+            results["cnr"] = np.nan
+
+        # Calculate FWHM using image standard deviation as sigma approximation
+        sigma_approx = np.std(gray_img.astype(np.float64))
+        results["fwhm"] = calculate_fwhm_from_sigma(sigma_approx)
+
+        # Add MTF calculation using a simple line profile approach
+        try:
+            # Create a simple Line Spread Function from image gradient
+            # Use Sobel operator to find edges, then extract a representative line profile
+            sobel_x = cv2.Sobel(gray_img, cv2.CV_64F, 1, 0, ksize=3)
+            sobel_y = cv2.Sobel(gray_img, cv2.CV_64F, 0, 1, ksize=3)
+
+            # Find the strongest edge direction
+            gradient_mag = np.sqrt(sobel_x**2 + sobel_y**2)
+
+            # Extract a line profile from the center of the image
+            center_row = h // 2
+            line_profile = gray_img[center_row, :].astype(np.float64)
+
+            # Calculate MTF from this line profile
+            frequencies, mtf_values = calculate_mtf_from_lsf(line_profile)
+
+            # Return MTF50 (frequency at 50% contrast) as a single metric
+            if len(mtf_values) > 0:
+                # Find the frequency where MTF drops to 50%
+                mtf50_idx = np.where(mtf_values <= 0.5)[0]
+                if len(mtf50_idx) > 0:
+                    # Take positive frequencies only
+                    positive_freq_mask = frequencies >= 0
+                    pos_frequencies = frequencies[positive_freq_mask]
+                    pos_mtf = mtf_values[positive_freq_mask]
+
+                    mtf50_idx = np.where(pos_mtf <= 0.5)[0]
+                    if len(mtf50_idx) > 0:
+                        results["mtf50"] = float(pos_frequencies[mtf50_idx[0]])
+                    else:
+                        results["mtf50"] = np.nan
+                else:
+                    results["mtf50"] = np.nan
+            else:
+                results["mtf50"] = np.nan
+
+        except Exception as mtf_error:
+            results["mtf50"] = np.nan
+
+        return results
+    except Exception as e:
+        print(f"⚠️  Error dalam kalkulasi metrik lanjutan: {e}")
+        return {
+            "uniformity": np.nan,
+            "snr": np.nan,
+            "cnr": np.nan,
+            "fwhm": np.nan,
+            "mtf50": np.nan,
+        }
+
+
 # 📝 TEMPLATE UNTUK MENAMBAHKAN METRIK BARU:
 #
 # def calculate_your_new_metric(image, **kwargs):
@@ -660,6 +921,14 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                     gray_img, r=eme_r, c=eme_c
                 )
 
+                # Add new advanced metrics
+                advanced_metrics = calculate_advanced_metrics(img)
+                row_data[f'UNIFORMITY "{folder_name}"'] = advanced_metrics["uniformity"]
+                row_data[f'SNR "{folder_name}"'] = advanced_metrics["snr"]
+                row_data[f'CNR "{folder_name}"'] = advanced_metrics["cnr"]
+                row_data[f'FWHM "{folder_name}"'] = advanced_metrics["fwhm"]
+                row_data[f'MTF50 "{folder_name}"'] = advanced_metrics["mtf50"]
+
                 # 📝 TAMBAHKAN METRIK BARU DI SINI:
                 # row_data[f'YOUR_METRIC "{folder_name}"'] = calculate_your_new_metric(gray_img)
             except Exception as e:
@@ -669,6 +938,11 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                 print(f"   Kemungkinan format gambar tidak sesuai atau file rusak")
                 row_data[f'ENT "{folder_name}"'] = "ERROR"
                 row_data[f'EME "{folder_name}"'] = "ERROR"
+                row_data[f'UNIFORMITY "{folder_name}"'] = "ERROR"
+                row_data[f'SNR "{folder_name}"'] = "ERROR"
+                row_data[f'CNR "{folder_name}"'] = "ERROR"
+                row_data[f'FWHM "{folder_name}"'] = "ERROR"
+                row_data[f'MTF50 "{folder_name}"'] = "ERROR"
 
         # 2. Hitung CII antar folder (only between different folders)
         for i, proc_path in enumerate(folder_paths):
@@ -693,6 +967,9 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                         )
                         print(f"   Alasan: Ukuran atau format gambar berbeda")
                         row_data[f'CII "{proc_name}"/"{ref_name}"'] = (
+                            "TIDAK BISA DIBANDINGKAN"
+                        )
+                        row_data[f'DIC "{proc_name}"/"{ref_name}"'] = (
                             "TIDAK BISA DIBANDINGKAN"
                         )
                         continue
@@ -740,6 +1017,10 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
 
                         row_data[f'CII "{proc_name}"/"{ref_name}"'] = cii_result
 
+                        # Calculate DIC: displacement from reference to processed
+                        dic_result = calculate_dic_metric(ref_img, proc_img)
+                        row_data[f'DIC "{proc_name}"/"{ref_name}"'] = dic_result
+
                         # 📝 TAMBAHKAN METRIK PERBANDINGAN ANTAR FOLDER DI SINI:
                         # Contoh untuk PSNR:
                         # row_data[f'PSNR "{proc_name}" vs "{ref_name}"'] = calculate_psnr(proc_gray, ref_gray)
@@ -748,6 +1029,7 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                             f"⚠️  Gagal menghitung CII untuk {proc_name}/{ref_name}, gambar {img_num}: {e}"
                         )
                         row_data[f'CII "{proc_name}"/"{ref_name}"'] = np.nan
+                        row_data[f'DIC "{proc_name}"/"{ref_name}"'] = np.nan
 
         results.append(row_data)
 
@@ -792,6 +1074,14 @@ def process_single_image(args):
             row_data[f'ENT "{folder_name}"'] = calculate_entropy(gray_img)
             row_data[f'EME "{folder_name}"'] = calculate_eme(gray_img, r=eme_r, c=eme_c)
 
+            # Add new advanced metrics
+            advanced_metrics = calculate_advanced_metrics(img)
+            row_data[f'UNIFORMITY "{folder_name}"'] = advanced_metrics["uniformity"]
+            row_data[f'SNR "{folder_name}"'] = advanced_metrics["snr"]
+            row_data[f'CNR "{folder_name}"'] = advanced_metrics["cnr"]
+            row_data[f'FWHM "{folder_name}"'] = advanced_metrics["fwhm"]
+            row_data[f'MTF50 "{folder_name}"'] = advanced_metrics["mtf50"]
+
             # 📝 TAMBAHKAN METRIK BARU DI SINI JUGA (untuk pemrosesan paralel):
             # row_data[f'YOUR_METRIC "{folder_name}"'] = calculate_your_new_metric(gray_img)
         except Exception as e:
@@ -800,6 +1090,11 @@ def process_single_image(args):
             )
             row_data[f'ENT "{folder_name}"'] = np.nan
             row_data[f'EME "{folder_name}"'] = np.nan
+            row_data[f'UNIFORMITY "{folder_name}"'] = np.nan
+            row_data[f'SNR "{folder_name}"'] = np.nan
+            row_data[f'CNR "{folder_name}"'] = np.nan
+            row_data[f'FWHM "{folder_name}"'] = np.nan
+            row_data[f'MTF50 "{folder_name}"'] = np.nan
 
     # 2. Hitung CII antar folder (only between different folders)
     for ref_path, proc_path in cii_combinations:
@@ -816,6 +1111,7 @@ def process_single_image(args):
                     f"⚠️  Gambar {img_num}: Gambar tidak kompatibel untuk CII: {message}"
                 )
                 row_data[f'CII "{proc_name}"/"{ref_name}"'] = np.nan
+                row_data[f'DIC "{proc_name}"/"{ref_name}"'] = np.nan
                 continue
 
             try:
@@ -853,6 +1149,10 @@ def process_single_image(args):
 
                 row_data[f'CII "{proc_name}"/"{ref_name}"'] = cii_result
 
+                # Calculate DIC: displacement from reference to processed
+                dic_result = calculate_dic_metric(ref_img, proc_img)
+                row_data[f'DIC "{proc_name}"/"{ref_name}"'] = dic_result
+
                 # 📝 TAMBAHKAN METRIK PERBANDINGAN ANTAR FOLDER DI SINI JUGA:
                 # Contoh untuk PSNR:
                 # row_data[f'PSNR "{proc_name}" vs "{ref_name}"'] = calculate_psnr(proc_gray, ref_gray)
@@ -861,63 +1161,65 @@ def process_single_image(args):
                     f"⚠️  Gagal menghitung CII untuk {proc_name}/{ref_name}, gambar {img_num}: {e}"
                 )
                 row_data[f'CII "{proc_name}"/"{ref_name}"'] = np.nan
+                row_data[f'DIC "{proc_name}"/"{ref_name}"'] = np.nan
 
     return row_data
 
 
-def calculate_all_metrics_parallel(folder_paths, image_map, all_image_numbers, options):
+def calculate_dic_metric(reference_image, deformed_image):
     """
-    Calculate metrics using parallel processing for better performance.
+    Menghitung metrik Digital Image Correlation untuk mengukur displacement rata-rata.
+
+    Fungsi ini menghitung displacement di beberapa titik dan mengembalikan
+    magnitude rata-rata sebagai metrik tunggal.
     """
-    folder_names = {path: os.path.basename(path) for path in folder_paths}
-    # Create combinations for CII calculation (only between different folders)
-    cii_combinations = []
-    for i, proc_path in enumerate(folder_paths):
-        for j, ref_path in enumerate(folder_paths):
-            if i > j:  # Only later folders compared to earlier folders
-                cii_combinations.append((ref_path, proc_path))
+    try:
+        # Convert to grayscale if needed
+        if len(reference_image.shape) == 3:
+            ref_gray = cv2.cvtColor(reference_image, cv2.COLOR_BGR2GRAY)
+        else:
+            ref_gray = reference_image.copy()
 
-    use_parallel = options.get("use_parallel", False)
+        if len(deformed_image.shape) == 3:
+            def_gray = cv2.cvtColor(deformed_image, cv2.COLOR_BGR2GRAY)
+        else:
+            def_gray = deformed_image.copy()
 
-    # Prepare arguments for each image
-    args_list = []
-    for img_num in all_image_numbers:
-        args_list.append(
-            (img_num, folder_paths, image_map, folder_names, cii_combinations, options)
-        )
+        # Normalize to 8-bit for consistent processing
+        if ref_gray.dtype != np.uint8:
+            ref_gray = cv2.convertScaleAbs(ref_gray)
+        if def_gray.dtype != np.uint8:
+            def_gray = cv2.convertScaleAbs(def_gray)
 
-    results = []
+        h, w = ref_gray.shape
+        subset_size = 31  # Must be odd
 
-    if use_parallel and len(args_list) > 1:
-        # Use parallel processing
-        max_workers = min(
-            4, os.cpu_count() or 1
-        )  # Limit workers to prevent memory issues
-        print(f"🚀 Menggunakan pemrosesan cepat dengan {max_workers} proses paralel...")
-        print("   Silakan tunggu, proses sedang berjalan...")
+        # Define grid of points to track (avoid edges)
+        margin = subset_size // 2 + 10
+        step = max(50, min(h, w) // 8)  # Adaptive step size
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(process_single_image, args) for args in args_list
-            ]
+        displacements = []
 
-            for future in tqdm(
-                as_completed(futures), total=len(futures), desc="Processing Images"
-            ):
-                try:
-                    result = future.result()
-                    if result is not None:
-                        results.append(result)
-                except Exception as e:
-                    print(f"Error processing image: {e}")
-    else:
-        # Sequential processing
-        for args in tqdm(args_list, desc="Menghitung Metrik", unit="gambar"):
-            result = process_single_image(args)
-            if result is not None:
-                results.append(result)
+        for y in range(margin, h - margin, step):
+            for x in range(margin, w - margin, step):
+                dx, dy = calculate_dic_displacement(
+                    ref_gray, def_gray, (x, y), subset_size
+                )
+                if dx is not None and dy is not None:
+                    # Calculate magnitude of displacement
+                    magnitude = np.sqrt(dx**2 + dy**2)
+                    if magnitude < 1000:  # Filter out unrealistic large displacements
+                        displacements.append(magnitude)
 
-    return results
+        if len(displacements) > 0:
+            # Return average displacement magnitude
+            return float(np.mean(displacements))
+        else:
+            return np.nan
+
+    except Exception as e:
+        print(f"⚠️  Error dalam kalkulasi DIC metric: {e}")
+        return np.nan
 
 
 def main():
@@ -925,7 +1227,7 @@ def main():
     try:
         print("🔬" + "=" * 60 + "🔬")
         print("     PROGRAM ANALISIS KUALITAS GAMBAR")
-        print("        Mengukur Entropi, EME, dan CII")
+        print("     Mengukur Entropi, EME, CII, dan DIC")
         print("🔬" + "=" * 60 + "🔬")
         print("")
         print("Selamat datang! Program ini akan membantu Anda menganalisis")
@@ -933,6 +1235,12 @@ def main():
         print("• ENT (Entropi)")
         print("• EME (Effective Measure of Enhancement)")
         print("• CII (Contrast Improvement Index)")
+        print("• UNIFORMITY (Uniformitas Kontras)")
+        print("• SNR (Signal-to-Noise Ratio)")
+        print("• CNR (Contrast-to-Noise Ratio)")
+        print("• FWHM (Full Width at Half Maximum)")
+        print("• MTF50 (Modulation Transfer Function at 50%)")
+        print("• DIC (Digital Image Correlation)")
         print("")
         print("📋 PENTING - Format Nama File:")
         print("   Program akan membandingkan gambar berdasarkan nomor urut")
@@ -992,7 +1300,15 @@ def main():
         cols = ["no gambar"]
         ent_cols = sorted([col for col in df.columns if col.startswith("ENT")])
         eme_cols = sorted([col for col in df.columns if col.startswith("EME")])
+        uniformity_cols = sorted(
+            [col for col in df.columns if col.startswith("UNIFORMITY")]
+        )
+        snr_cols = sorted([col for col in df.columns if col.startswith("SNR")])
+        cnr_cols = sorted([col for col in df.columns if col.startswith("CNR")])
+        fwhm_cols = sorted([col for col in df.columns if col.startswith("FWHM")])
+        mtf50_cols = sorted([col for col in df.columns if col.startswith("MTF50")])
         cii_cols = sorted([col for col in df.columns if col.startswith("CII")])
+        dic_cols = sorted([col for col in df.columns if col.startswith("DIC")])
 
         # 📝 TAMBAHKAN SORTING KOLOM METRIK BARU DI SINI:
         # your_metric_cols = sorted([col for col in df.columns if col.startswith("YOUR_METRIC")])
@@ -1001,7 +1317,18 @@ def main():
         # df.columns = df.columns.str.replace('nama_panjang', 'nama_pendek')
         # Contoh: df.columns = df.columns.str.replace('_images', '')
 
-        df = df.reindex(columns=cols + ent_cols + eme_cols + cii_cols)
+        df = df.reindex(
+            columns=cols
+            + ent_cols
+            + eme_cols
+            + uniformity_cols
+            + snr_cols
+            + cnr_cols
+            + fwhm_cols
+            + mtf50_cols
+            + cii_cols
+            + dic_cols
+        )
         # 📝 JANGAN LUPA UPDATE REINDEX INI JUGA:
         # df = df.reindex(columns=cols + ent_cols + eme_cols + your_metric_cols + cii_cols)
 
