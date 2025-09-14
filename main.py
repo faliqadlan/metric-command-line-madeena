@@ -17,6 +17,10 @@ import time
 # 3. Tambahkan error handling dengan try-catch
 # 4. Lihat file HOW_TO_ADD_METRICS.md untuk panduan lengkap
 
+# Set up detailed logging
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
+
 
 def calculate_contrast(image, mask):
     """
@@ -30,16 +34,30 @@ def calculate_contrast(image, mask):
         if image.shape != mask.shape:
             return 0.0
 
-        # Pastikan mask adalah binary (0 atau 1)
+        # Special handling for "none" mask method (all ones)
         mask_binary = (mask > 0).astype(np.uint8)
-
         foreground = image[mask_binary == 1]
         background = image[mask_binary == 0]
 
-        # Cek apakah ada piksel di foreground dan background
-        if foreground.size == 0 or background.size == 0:
+        # If mask is all ones (no background), use statistical approach
+        if background.size == 0:
+            # Use standard deviation as contrast measure when no mask segmentation
+            mean_intensity = np.mean(image.astype(np.float64))
+            std_intensity = np.std(image.astype(np.float64))
+
+            # Normalize by mean to get relative contrast
+            if mean_intensity > 1e-10:
+                contrast = std_intensity / mean_intensity
+            else:
+                contrast = 0.0
+
+            return float(contrast)
+
+        # If mask is all zeros (no foreground), return 0
+        if foreground.size == 0:
             return 0.0
 
+        # Standard foreground-background contrast calculation
         X_f = np.mean(foreground.astype(np.float64))
         X_b = np.mean(background.astype(np.float64))
 
@@ -211,7 +229,9 @@ def create_roi_mask(image, method="otsu"):
         Binary mask array
     """
     if method == "none":
-        return np.ones_like(image, dtype=np.uint8)
+        # Return all ones mask
+        mask = np.ones_like(image, dtype=np.uint8)
+        return mask
 
     # Convert to grayscale if needed
     if len(image.shape) == 3:
@@ -240,6 +260,23 @@ def create_roi_mask(image, method="otsu"):
             mask = (gray > threshold).astype(np.uint8)
         else:
             mask = np.ones_like(gray, dtype=np.uint8)
+
+        # Validate mask has both foreground and background pixels (except for "none" method)
+        if method != "none":
+            fg_pixels = np.sum(mask)
+            bg_pixels = mask.size - fg_pixels
+            if fg_pixels == 0 or bg_pixels == 0:
+                # Create a simple center-based mask as fallback
+                h, w = mask.shape
+                center_mask = np.zeros_like(mask)
+                center_h, center_w = h // 4, w // 4
+                center_mask[center_h : h - center_h, center_w : w - center_w] = 1
+                if np.sum(center_mask) > 0 and np.sum(center_mask) < center_mask.size:
+                    mask = center_mask
+                else:
+                    # Last resort: use all ones and let contrast calculation handle it
+                    mask = np.ones_like(gray, dtype=np.uint8)
+
     except Exception as e:
         print(f"⚠️  Peringatan: Gagal membuat area fokus analisis")
         print(f"   Program akan menganalisis seluruh gambar sebagai gantinya")
@@ -708,7 +745,7 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                         # row_data[f'PSNR "{proc_name}" vs "{ref_name}"'] = calculate_psnr(proc_gray, ref_gray)
                     except Exception as e:
                         print(
-                            f"Warning: Failed to calculate CII for {proc_name}/{ref_name}, image {img_num}: {e}"
+                            f"⚠️  Gagal menghitung CII untuk {proc_name}/{ref_name}, gambar {img_num}: {e}"
                         )
                         row_data[f'CII "{proc_name}"/"{ref_name}"'] = np.nan
 
@@ -759,7 +796,7 @@ def process_single_image(args):
             # row_data[f'YOUR_METRIC "{folder_name}"'] = calculate_your_new_metric(gray_img)
         except Exception as e:
             print(
-                f"Warning: Failed to calculate metrics for {folder_name}, image {img_num}: {e}"
+                f"⚠️  Gagal menganalisis gambar {img_num} dari folder {folder_name}: {e}"
             )
             row_data[f'ENT "{folder_name}"'] = np.nan
             row_data[f'EME "{folder_name}"'] = np.nan
@@ -775,7 +812,9 @@ def process_single_image(args):
             # Validate image compatibility
             is_compatible, message = validate_image_compatibility(ref_img, proc_img)
             if not is_compatible:
-                print(f"Warning: Images incompatible for CII calculation ({message})")
+                print(
+                    f"⚠️  Gambar {img_num}: Gambar tidak kompatibel untuk CII: {message}"
+                )
                 row_data[f'CII "{proc_name}"/"{ref_name}"'] = np.nan
                 continue
 
@@ -802,6 +841,7 @@ def process_single_image(args):
                     if mask is None or mask.shape != ref_gray.shape:
                         mask = np.ones_like(ref_gray, dtype=np.uint8)
                 except Exception as mask_error:
+                    print(f"⚠️  Gambar {img_num}: Error membuat mask: {mask_error}")
                     mask = np.ones_like(ref_gray, dtype=np.uint8)
 
                 # Calculate CII: processed / reference
@@ -818,7 +858,7 @@ def process_single_image(args):
                 # row_data[f'PSNR "{proc_name}" vs "{ref_name}"'] = calculate_psnr(proc_gray, ref_gray)
             except Exception as e:
                 print(
-                    f"Warning: Failed to calculate CII for {proc_name}/{ref_name}, image {img_num}: {e}"
+                    f"⚠️  Gagal menghitung CII untuk {proc_name}/{ref_name}, gambar {img_num}: {e}"
                 )
                 row_data[f'CII "{proc_name}"/"{ref_name}"'] = np.nan
 
