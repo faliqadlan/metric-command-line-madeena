@@ -194,7 +194,6 @@ def calculate_eme(image, r, c, epsilon=1e-4):
 #         result = np.mean(gray_img)
 #
 #         return float(result)
-#
 #     except Exception as e:
 #         print(f"⚠️  Error menghitung metrik baru: {e}")
 #         return np.nan
@@ -522,7 +521,8 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
     """Menghitung semua metrik untuk gambar yang cocok dan menampilkan progress."""
     results = []
     folder_names = {path: os.path.basename(path) for path in folder_paths}
-    cii_combinations = list(itertools.combinations(folder_paths, 2))
+    # Remove this line as we'll handle combinations differently
+    # cii_combinations = list(itertools.combinations(folder_paths, 2))
 
     eme_r = options.get("eme_r", 4)
     eme_c = options.get("eme_c", 4)
@@ -569,21 +569,15 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                 row_data[f"ENT {folder_name}"] = "ERROR"
                 row_data[f"EME {folder_name}"] = "ERROR"
 
-        # 2. Hitung CII antar folder
-        # 📝 UNTUK METRIK YANG MEMBANDINGKAN ANTAR FOLDER (seperti CII, PSNR, SSIM):
-        # Logika: folder yang diinput belakangan (processed) dibagi folder yang diinput lebih dulu (reference)
+        # 2. Hitung CII antar folder (only between different folders)
         for i, proc_path in enumerate(folder_paths):
             for j, ref_path in enumerate(folder_paths):
-                if i < j:  # Skip jika processed tidak lebih belakangan dari reference
+                # Only calculate CII between different folders, and only in one direction
+                if i <= j:  # Skip same folder and avoid duplicate comparisons
                     continue
 
                 proc_name = folder_names[proc_path]  # folder belakangan = processed
                 ref_name = folder_names[ref_path]  # folder lebih dulu = reference
-
-                # Jika folder sama, CII = 1.0 (gambar sama dengan dirinya sendiri)
-                if proc_path == ref_path:
-                    row_data[f"CII {proc_name}/{ref_name}"] = 1.0
-                    continue
 
                 if ref_path in images and proc_path in images:
                     ref_img, proc_img = images[ref_path], images[proc_path]
@@ -602,58 +596,57 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                         )
                         continue
 
-                try:
-                    # Convert to grayscale if needed
-                    if len(ref_img.shape) == 3:
-                        ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
-                        proc_gray = cv2.cvtColor(proc_img, cv2.COLOR_BGR2GRAY)
-                    else:
-                        ref_gray = ref_img.copy()
-                        proc_gray = proc_img.copy()
-
-                    # Ensure images are in the same data type
-                    if ref_gray.dtype != proc_gray.dtype:
-                        # Convert to float64 for consistent calculation
-                        ref_gray = ref_gray.astype(np.float64)
-                        proc_gray = proc_gray.astype(np.float64)
-
-                    # Create mask with error handling
                     try:
-                        mask = create_roi_mask(ref_gray, method=mask_method)
+                        # Convert to grayscale if needed
+                        if len(ref_img.shape) == 3:
+                            ref_gray = cv2.cvtColor(ref_img, cv2.COLOR_BGR2GRAY)
+                            proc_gray = cv2.cvtColor(proc_img, cv2.COLOR_BGR2GRAY)
+                        else:
+                            ref_gray = ref_img.copy()
+                            proc_gray = proc_img.copy()
 
-                        # Validate mask
-                        if mask is None or mask.shape != ref_gray.shape:
+                        # Ensure images are in the same data type
+                        if ref_gray.dtype != proc_gray.dtype:
+                            # Convert to float64 for consistent calculation
+                            ref_gray = ref_gray.astype(np.float64)
+                            proc_gray = proc_gray.astype(np.float64)
+
+                        # Create mask with error handling
+                        try:
+                            mask = create_roi_mask(ref_gray, method=mask_method)
+
+                            # Validate mask
+                            if mask is None or mask.shape != ref_gray.shape:
+                                print(
+                                    f"⚠️  Gambar {img_num}: Mask tidak valid, menggunakan seluruh gambar"
+                                )
+                                mask = np.ones_like(ref_gray, dtype=np.uint8)
+                        except Exception as mask_error:
                             print(
-                                f"⚠️  Gambar {img_num}: Mask tidak valid, menggunakan seluruh gambar"
+                                f"⚠️  Gambar {img_num}: Error membuat mask, menggunakan seluruh gambar"
                             )
                             mask = np.ones_like(ref_gray, dtype=np.uint8)
-                    except Exception as mask_error:
+
+                        # Calculate CII: processed / reference
+                        cii_result = calculate_cii(proc_gray, ref_gray, mask)
+
+                        # Validate CII results
+                        if np.isinf(cii_result):
+                            print(
+                                f"⚠️  Gambar {img_num}: CII {proc_name}/{ref_name} menghasilkan infinity"
+                            )
+                            cii_result = np.nan
+
+                        row_data[f"CII {proc_name}/{ref_name}"] = cii_result
+
+                        # 📝 TAMBAHKAN METRIK PERBANDINGAN ANTAR FOLDER DI SINI:
+                        # Contoh untuk PSNR:
+                        # row_data[f"PSNR {proc_name} vs {ref_name}"] = calculate_psnr(proc_gray, ref_gray)
+                    except Exception as e:
                         print(
-                            f"⚠️  Gambar {img_num}: Error membuat mask, menggunakan seluruh gambar"
+                            f"Warning: Failed to calculate CII for {proc_name}/{ref_name}, image {img_num}: {e}"
                         )
-                        mask = np.ones_like(ref_gray, dtype=np.uint8)
-
-                    # Calculate CII: processed / reference
-                    cii_result = calculate_cii(proc_gray, ref_gray, mask)
-
-                    # Validate CII results
-                    if np.isinf(cii_result):
-                        print(
-                            f"⚠️  Gambar {img_num}: CII {proc_name}/{ref_name} menghasilkan infinity"
-                        )
-                        cii_result = np.nan
-
-                    row_data[f"CII {proc_name}/{ref_name}"] = cii_result
-
-                    # 📝 TAMBAHKAN METRIK PERBANDINGAN ANTAR FOLDER DI SINI:
-                    # Contoh untuk PSNR:
-                    # row_data[f"PSNR {proc_name} vs {ref_name}"] = calculate_psnr(proc_gray, ref_gray)
-                    # row_data[f"PSNR {ref_name} vs {proc_name}"] = calculate_psnr(ref_gray, proc_gray)
-                except Exception as e:
-                    print(
-                        f"Warning: Failed to calculate CII for {proc_name}/{ref_name}, image {img_num}: {e}"
-                    )
-                    row_data[f"CII {proc_name}/{ref_name}"] = np.nan
+                        row_data[f"CII {proc_name}/{ref_name}"] = np.nan
 
         results.append(row_data)
 
@@ -707,17 +700,10 @@ def process_single_image(args):
             row_data[f"ENT {folder_name}"] = np.nan
             row_data[f"EME {folder_name}"] = np.nan
 
-    # 2. Hitung CII antar folder
-    # 📝 UNTUK METRIK PERBANDINGAN ANTAR FOLDER (seperti CII, PSNR, SSIM):
-    # Tambahkan kalkulasi di bagian ini juga, untuk pemrosesan paralel
+    # 2. Hitung CII antar folder (only between different folders)
     for ref_path, proc_path in cii_combinations:
         ref_name = folder_names[ref_path]  # reference (earlier folder)
         proc_name = folder_names[proc_path]  # processed (later folder)
-
-        # Jika folder sama, CII = 1.0 (gambar sama dengan dirinya sendiri)
-        if ref_path == proc_path:
-            row_data[f"CII {proc_name}/{ref_name}"] = 1.0
-            continue
 
         if ref_path in images and proc_path in images:
             ref_img, proc_img = images[ref_path], images[proc_path]
@@ -766,7 +752,6 @@ def process_single_image(args):
                 # 📝 TAMBAHKAN METRIK PERBANDINGAN ANTAR FOLDER DI SINI JUGA:
                 # Contoh untuk PSNR:
                 # row_data[f"PSNR {proc_name} vs {ref_name}"] = calculate_psnr(proc_gray, ref_gray)
-                # row_data[f"PSNR {ref_name} vs {proc_name}"] = calculate_psnr(ref_gray, proc_gray)
             except Exception as e:
                 print(
                     f"Warning: Failed to calculate CII for {proc_name}/{ref_name}, image {img_num}: {e}"
@@ -781,12 +766,13 @@ def calculate_all_metrics_parallel(folder_paths, image_map, all_image_numbers, o
     Calculate metrics using parallel processing for better performance.
     """
     folder_names = {path: os.path.basename(path) for path in folder_paths}
-    # Create combinations for all folder pairs (including same folder)
+    # Create combinations for CII calculation (only between different folders)
     cii_combinations = []
     for i, proc_path in enumerate(folder_paths):
         for j, ref_path in enumerate(folder_paths):
-            if i >= j:  # Include same folder (i == j) and later folders (i > j)
+            if i > j:  # Only later folders compared to earlier folders
                 cii_combinations.append((ref_path, proc_path))
+
     use_parallel = options.get("use_parallel", False)
 
     # Prepare arguments for each image
@@ -835,6 +821,20 @@ def main():
     try:
         print("🏥" + "=" * 60 + "🏥")
         print("     PROGRAM ANALISIS KUALITAS GAMBAR RONTGEN")
+        print("        Mengukur Entropi, EME, dan CII")
+        print("🏥" + "=" * 60 + "🏥")
+        print("")
+        print("Selamat datang! Program ini akan membantu Anda menganalisis")
+        print("kualitas gambar rontgen dengan menghitung metrik:")
+        print("• ENT (Entropi)")
+        print("• EME (Effective Measure of Enhancement)")
+        print("• CII (Contrast Improvement Index)")
+        print("")
+        print("📋 PENTING - Format Nama File:")
+        print("   Program akan membandingkan gambar berdasarkan nomor urut")
+        print("   Contoh: 1_xray1.jpg di folder A vs 1_rontgen.jpg di folder B")
+        print("   Format: NOMOR_NAMAFILE (nomor sama = gambar yang dibandingkan)")
+        print("")
         print("        Mengukur Entropi, EME, dan CII")
         print("🏥" + "=" * 60 + "🏥")
         print("")
