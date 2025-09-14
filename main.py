@@ -521,8 +521,6 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
     """Menghitung semua metrik untuk gambar yang cocok dan menampilkan progress."""
     results = []
     folder_names = {path: os.path.basename(path) for path in folder_paths}
-    # Remove this line as we'll handle combinations differently
-    # cii_combinations = list(itertools.combinations(folder_paths, 2))
 
     eme_r = options.get("eme_r", 4)
     eme_c = options.get("eme_c", 4)
@@ -554,20 +552,20 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                 else:
                     gray_img = img
 
-                row_data[f"ENT {folder_name}"] = calculate_entropy(gray_img)
-                row_data[f"EME {folder_name}"] = calculate_eme(
+                row_data[f'ENT "{folder_name}"'] = calculate_entropy(gray_img)
+                row_data[f'EME "{folder_name}"'] = calculate_eme(
                     gray_img, r=eme_r, c=eme_c
                 )
 
                 # 📝 TAMBAHKAN METRIK BARU DI SINI:
-                # row_data[f"YOUR_METRIC {folder_name}"] = calculate_your_new_metric(gray_img)
+                # row_data[f'YOUR_METRIC "{folder_name}"'] = calculate_your_new_metric(gray_img)
             except Exception as e:
                 print(
                     f"⚠️  Gagal menganalisis gambar {img_num} dari folder {folder_name}"
                 )
                 print(f"   Kemungkinan format gambar tidak sesuai atau file rusak")
-                row_data[f"ENT {folder_name}"] = "ERROR"
-                row_data[f"EME {folder_name}"] = "ERROR"
+                row_data[f'ENT "{folder_name}"'] = "ERROR"
+                row_data[f'EME "{folder_name}"'] = "ERROR"
 
         # 2. Hitung CII antar folder (only between different folders)
         for i, proc_path in enumerate(folder_paths):
@@ -591,7 +589,7 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                             f"⚠️  Gambar {img_num}: Tidak bisa dibandingkan antara {ref_name} dan {proc_name}"
                         )
                         print(f"   Alasan: Ukuran atau format gambar berbeda")
-                        row_data[f"CII {proc_name}/{ref_name}"] = (
+                        row_data[f'CII "{proc_name}"/"{ref_name}"'] = (
                             "TIDAK BISA DIBANDINGKAN"
                         )
                         continue
@@ -637,16 +635,16 @@ def calculate_all_metrics(folder_paths, image_map, all_image_numbers, options):
                             )
                             cii_result = np.nan
 
-                        row_data[f"CII {proc_name}/{ref_name}"] = cii_result
+                        row_data[f'CII "{proc_name}"/"{ref_name}"'] = cii_result
 
                         # 📝 TAMBAHKAN METRIK PERBANDINGAN ANTAR FOLDER DI SINI:
                         # Contoh untuk PSNR:
-                        # row_data[f"PSNR {proc_name} vs {ref_name}"] = calculate_psnr(proc_gray, ref_gray)
+                        # row_data[f'PSNR "{proc_name}" vs "{ref_name}"'] = calculate_psnr(proc_gray, ref_gray)
                     except Exception as e:
                         print(
                             f"Warning: Failed to calculate CII for {proc_name}/{ref_name}, image {img_num}: {e}"
                         )
-                        row_data[f"CII {proc_name}/{ref_name}"] = np.nan
+                        row_data[f'CII "{proc_name}"/"{ref_name}"'] = np.nan
 
         results.append(row_data)
 
@@ -688,17 +686,17 @@ def process_single_image(args):
             else:
                 gray_img = img
 
-            row_data[f"ENT {folder_name}"] = calculate_entropy(gray_img)
-            row_data[f"EME {folder_name}"] = calculate_eme(gray_img, r=eme_r, c=eme_c)
+            row_data[f'ENT "{folder_name}"'] = calculate_entropy(gray_img)
+            row_data[f'EME "{folder_name}"'] = calculate_eme(gray_img, r=eme_r, c=eme_c)
 
             # 📝 TAMBAHKAN METRIK BARU DI SINI JUGA (untuk pemrosesan paralel):
-            # row_data[f"YOUR_METRIC {folder_name}"] = calculate_your_new_metric(gray_img)
+            # row_data[f'YOUR_METRIC "{folder_name}"'] = calculate_your_new_metric(gray_img)
         except Exception as e:
             print(
                 f"Warning: Failed to calculate metrics for {folder_name}, image {img_num}: {e}"
             )
-            row_data[f"ENT {folder_name}"] = np.nan
-            row_data[f"EME {folder_name}"] = np.nan
+            row_data[f'ENT "{folder_name}"'] = np.nan
+            row_data[f'EME "{folder_name}"'] = np.nan
 
     # 2. Hitung CII antar folder (only between different folders)
     for ref_path, proc_path in cii_combinations:
@@ -712,7 +710,7 @@ def process_single_image(args):
             is_compatible, message = validate_image_compatibility(ref_img, proc_img)
             if not is_compatible:
                 print(f"Warning: Images incompatible for CII calculation ({message})")
-                row_data[f"CII {proc_name}/{ref_name}"] = np.nan
+                row_data[f'CII "{proc_name}"/"{ref_name}"'] = np.nan
                 continue
 
             try:
@@ -747,16 +745,16 @@ def process_single_image(args):
                 if np.isinf(cii_result):
                     cii_result = np.nan
 
-                row_data[f"CII {proc_name}/{ref_name}"] = cii_result
+                row_data[f'CII "{proc_name}"/"{ref_name}"'] = cii_result
 
                 # 📝 TAMBAHKAN METRIK PERBANDINGAN ANTAR FOLDER DI SINI JUGA:
                 # Contoh untuk PSNR:
-                # row_data[f"PSNR {proc_name} vs {ref_name}"] = calculate_psnr(proc_gray, ref_gray)
+                # row_data[f'PSNR "{proc_name}" vs "{ref_name}"'] = calculate_psnr(proc_gray, ref_gray)
             except Exception as e:
                 print(
                     f"Warning: Failed to calculate CII for {proc_name}/{ref_name}, image {img_num}: {e}"
                 )
-                row_data[f"CII {proc_name}/{ref_name}"] = np.nan
+                row_data[f'CII "{proc_name}"/"{ref_name}"'] = np.nan
 
     return row_data
 
