@@ -3,3 +3,4 @@ csv
 *.spec
 build
 dist
+*.xlsx

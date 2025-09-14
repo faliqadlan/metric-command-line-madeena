@@ -849,12 +849,6 @@ def main():
         print("   Contoh: 1_xray1.jpg di folder A vs 1_rontgen.jpg di folder B")
         print("   Format: NOMOR_NAMAFILE (nomor sama = gambar yang dibandingkan)")
         print("")
-        print("🔧 Info untuk Developer:")
-        print("   Untuk menambahkan metrik baru, lihat:")
-        print("   • File HOW_TO_ADD_METRICS.md - panduan lengkap")
-        print("   • Komentar 📝 di dalam kode - lokasi penambahan")
-        print("   • File EXAMPLE_ADD_VARIANCE_METRIC.py - contoh implementasi")
-        print("")
 
         folder_paths = get_folder_paths()
         if not folder_paths:
@@ -899,9 +893,9 @@ def main():
             )
             return
 
-        # Generate timestamped filename
+        # Generate timestamped filename - changed to .xlsx
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        output_filename = f"metrics_results_{timestamp}.csv"
+        output_filename = f"metrics_results_{timestamp}.xlsx"
 
         df = pd.DataFrame(results_data)
 
@@ -920,13 +914,61 @@ def main():
         df = df.reindex(columns=cols + ent_cols + eme_cols + cii_cols)
         # 📝 JANGAN LUPA UPDATE REINDEX INI JUGA:
         # df = df.reindex(columns=cols + ent_cols + eme_cols + your_metric_cols + cii_cols)
-        df.to_csv(output_filename, index=False, float_format="%.4f")
 
-        print(
-            f"\nProses selesai! Hasil disimpan di '{os.path.abspath(output_filename)}'"
-        )
-        print(f"Total baris data: {len(df)}")
-        print(f"Kolom yang dihasilkan: {len(df.columns)}")
+        # Save to Excel with proper formatting
+        try:
+            with pd.ExcelWriter(output_filename, engine="openpyxl") as writer:
+                df.to_excel(
+                    writer,
+                    sheet_name="Metrics Results",
+                    index=False,
+                    float_format="%.4f",
+                )
+
+                # Optional: Auto-adjust column widths
+                worksheet = writer.sheets["Metrics Results"]
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)  # Cap at 50 chars
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+
+            print(f"\n✅ Proses selesai! Hasil disimpan dalam format Excel:")
+            print(f"   📁 File: {os.path.abspath(output_filename)}")
+            print(f"   📊 Total baris data: {len(df)}")
+            print(f"   📋 Kolom yang dihasilkan: {len(df.columns)}")
+            print(
+                f"   💡 Gunakan Microsoft Excel atau LibreOffice Calc untuk membuka file"
+            )
+
+        except ImportError:
+            print("⚠️  Library openpyxl tidak ditemukan. Menyimpan dalam format CSV...")
+            # Fallback to CSV with comma as decimal separator
+            csv_filename = output_filename.replace(".xlsx", ".csv")
+            df.to_csv(
+                csv_filename, index=False, decimal=",", sep=";", float_format="%.4f"
+            )
+            print(f"\n✅ Proses selesai! Hasil disimpan dalam format CSV:")
+            print(f"   📁 File: {os.path.abspath(csv_filename)}")
+            print(
+                f"   💡 Untuk menginstal dukungan Excel, jalankan: pip install openpyxl"
+            )
+        except Exception as e:
+            print(f"⚠️  Error menyimpan file Excel: {e}")
+            # Fallback to CSV
+            csv_filename = output_filename.replace(".xlsx", ".csv")
+            df.to_csv(
+                csv_filename, index=False, decimal=",", sep=";", float_format="%.4f"
+            )
+            print(
+                f"   Menyimpan dalam format CSV sebagai gantinya: {os.path.abspath(csv_filename)}"
+            )
 
     except KeyboardInterrupt:
         print("\n\nProses dibatalkan oleh user.")
