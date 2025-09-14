@@ -434,21 +434,67 @@ def get_processing_options():
     print("📐 Pengaturan Analisis Detail (EME)")
     print("   Nilai ini menentukan seberapa detail analisis dilakukan")
     print("   Nilai lebih tinggi = analisis lebih detail (tapi lebih lama)")
+    print("   ⚠️  PENTING: Nilai harus berupa bilangan bulat positif (1, 2, 3, ...)")
     print("")
 
-    try:
-        r = int(
-            input("🔢 Pembagian vertikal gambar [biarkan kosong untuk nilai 4]: ")
-            or "4"
+    # Get vertical blocks with validation
+    while True:
+        try:
+            r_input = input(
+                "🔢 Pembagian vertikal gambar [biarkan kosong untuk nilai 4]: "
+            ).strip()
+            if not r_input:
+                r = 4
+                break
+
+            r = int(r_input)
+            if r <= 0:
+                print("❌ Nilai harus lebih besar dari 0. Silakan coba lagi.")
+                continue
+            if r > 20:
+                print(
+                    "⚠️  Nilai terlalu besar (>20), ini akan membuat proses sangat lambat."
+                )
+                confirm = input("   Tetap lanjutkan? (y/n): ").strip().lower()
+                if confirm not in ["y", "yes", "ya"]:
+                    continue
+            break
+        except ValueError:
+            print("❌ Harap masukkan bilangan bulat saja (contoh: 4, 8, 16)")
+
+    # Get horizontal blocks with validation
+    while True:
+        try:
+            c_input = input(
+                "🔢 Pembagian horizontal gambar [biarkan kosong untuk nilai 4]: "
+            ).strip()
+            if not c_input:
+                c = 4
+                break
+
+            c = int(c_input)
+            if c <= 0:
+                print("❌ Nilai harus lebih besar dari 0. Silakan coba lagi.")
+                continue
+            if c > 20:
+                print(
+                    "⚠️  Nilai terlalu besar (>20), ini akan membuat proses sangat lambat."
+                )
+                confirm = input("   Tetap lanjutkan? (y/n): ").strip().lower()
+                if confirm not in ["y", "yes", "ya"]:
+                    continue
+            break
+        except ValueError:
+            print("❌ Harap masukkan bilangan bulat saja (contoh: 4, 8, 16)")
+
+    print(f"✅ Menggunakan pembagian: {r} x {c} blok")
+
+    # Calculate total blocks and warn if too many
+    total_blocks = r * c
+    if total_blocks > 100:
+        print(
+            f"⚠️  Total {total_blocks} blok akan dianalisis - ini mungkin memakan waktu lama"
         )
-        c = int(
-            input("🔢 Pembagian horizontal gambar [biarkan kosong untuk nilai 4]: ")
-            or "4"
-        )
-        print(f"✅ Menggunakan pembagian: {r} x {c} blok")
-    except ValueError:
-        r, c = 4, 4
-        print("✅ Menggunakan pengaturan standar: 4 x 4 blok")
 
     print("\n⚡ Kecepatan Pemrosesan")
     print("   Pemrosesan paralel dapat mempercepat analisis")
